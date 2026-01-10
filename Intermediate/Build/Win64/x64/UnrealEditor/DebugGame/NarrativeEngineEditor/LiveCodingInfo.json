@@ -1,0 +1,12 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.NarrativeEngineEditor.cpp.obj": [
+			"NarrativeEngineEditor.init.gen.cpp.obj",
+			"NarrativeEngineViewTool.gen.cpp.obj",
+			"PerModuleInline.gen.cpp.obj",
+			"NarrativeEngineEditor.cpp.obj",
+			"NarrativeEngineViewTool.cpp.obj"
+		]
+	}
+}

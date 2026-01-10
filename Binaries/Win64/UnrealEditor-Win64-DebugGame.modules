@@ -1,0 +1,9 @@
+{
+	"BuildId": "47537391",
+	"Modules": 
+	{
+		"NarrativeEngine": "UnrealEditor-NarrativeEngine-Win64-DebugGame.dll",
+		"NarrativeEngineEditor": "UnrealEditor-NarrativeEngineEditor-Win64-DebugGame.dll",
+		"TextAdventureSample": "UnrealEditor-TextAdventureSample-Win64-DebugGame.dll"
+	}
+}
