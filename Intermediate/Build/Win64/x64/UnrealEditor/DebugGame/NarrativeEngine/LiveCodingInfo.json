@@ -1,0 +1,20 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.NarrativeEngine.cpp.obj": [
+			"NarrativeCoreData.gen.cpp.obj",
+			"NarrativeEngine.init.gen.cpp.obj",
+			"NarrativeEngineBPLibrary.gen.cpp.obj",
+			"NarrativeEntityComponent.gen.cpp.obj",
+			"NarrativeRuntimeData.gen.cpp.obj",
+			"NarrativeStaticData.gen.cpp.obj",
+			"NarrativeSubsystem.gen.cpp.obj",
+			"PerModuleInline.gen.cpp.obj",
+			"NarrativeEngine.cpp.obj",
+			"NarrativeEngineBPLibrary.cpp.obj",
+			"NarrativeEntityComponent.cpp.obj",
+			"NarrativeRuntimeData.cpp.obj",
+			"NarrativeSubsystem.cpp.obj"
+		]
+	}
+}
