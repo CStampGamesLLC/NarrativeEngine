@@ -1,9 +1,0 @@
-{
-	"RemapUnityFiles": 
-	{
-		"Module.TextAdventureSample.cpp.obj": [
-			"PerModuleInline.gen.cpp.obj",
-			"TextAdventureSample.cpp.obj"
-		]
-	}
-}
