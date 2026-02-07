@@ -94,8 +94,12 @@ class NARRATIVEENGINE_API UNarrativeDialogDef :  public UNarrativeDataAsset
 public:
 
 	// todo it'd be cool to break this phrase into a grammer where data fed into the grammar structure is determined via wave function collapse
+	/* What's actually said in its entirety */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FText Phrase;
+	/* One word description that indicates the emotion or action associated with delivering this phrase*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FText Label;
 
 #pragma region Narrative Engine Encounter
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
