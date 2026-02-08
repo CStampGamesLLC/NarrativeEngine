@@ -6,31 +6,31 @@
 
 
 UCLASS()
-class NARRATIVEENGINE_API UNarrativeEventDef :  public UNarrativeDataAsset
+class NARRATIVEENGINE_API UNarrativeEventDef : public UNarrativeDataAsset
 {
 	GENERATED_BODY()
 
 	NARRATIVE_DATA_HELPERS(UNarrativeEventDef)
 };
 
-template<>
-	inline uint32 GetClassHash<UNarrativeEventDef>()
+template <>
+inline uint32 GetClassHash<UNarrativeEventDef>()
 {
 	return GetTypeHash(UNarrativeEventDef::StaticClass());
 }
 
 UCLASS()
-class NARRATIVEENGINE_API UNarrativeEntityDef :  public UNarrativeDataAsset
+class NARRATIVEENGINE_API UNarrativeEntityDef : public UNarrativeDataAsset
 {
 	GENERATED_BODY()
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> StartingCoordinates;
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> PreviousCoordinates;
-	
+
 #pragma region Narrative Engine Encounter
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Location;
@@ -47,8 +47,8 @@ public:
 	/* Curvature imposed on the state space */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float RadialFalloffExponent;
-#pragma endregion 
-	
+#pragma endregion
+
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	double Mass;
@@ -56,26 +56,25 @@ public:
 	NARRATIVE_DATA_HELPERS(UNarrativeEntityDef)
 };
 
-template<>
+template <>
 inline uint32 GetClassHash<UNarrativeEntityDef>()
 {
 	return GetTypeHash(UNarrativeEntityDef::StaticClass());
 }
 
 UCLASS()
-class NARRATIVEENGINE_API UNarrativeActionDef :  public UNarrativeDataAsset
+class NARRATIVEENGINE_API UNarrativeActionDef : public UNarrativeDataAsset
 {
 	GENERATED_BODY()
 
 public:
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Force;
-	
+
 	NARRATIVE_DATA_HELPERS(UNarrativeActionDef)
 };
 
-template<>
+template <>
 inline uint32 GetClassHash<UNarrativeActionDef>()
 {
 	return GetTypeHash(UNarrativeActionDef::StaticClass());
@@ -87,12 +86,11 @@ inline uint32 GetClassHash<UNarrativeActionDef>()
  * The radius is a sort of entropy field for simulating wave function collapse in the narrative state hilbert space 
  */
 UCLASS()
-class NARRATIVEENGINE_API UNarrativeDialogDef :  public UNarrativeDataAsset
+class NARRATIVEENGINE_API UNarrativeDialogDef : public UNarrativeDataAsset
 {
 	GENERATED_BODY()
 
 public:
-
 	// todo it'd be cool to break this phrase into a grammer where data fed into the grammar structure is determined via wave function collapse
 	/* What's actually said in its entirety */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -122,7 +120,7 @@ public:
 	NARRATIVE_DATA_HELPERS(UNarrativeDialogDef)
 };
 
-template<>
+template <>
 inline uint32 GetClassHash<UNarrativeDialogDef>()
 {
 	return GetTypeHash(UNarrativeActionDef::StaticClass());

@@ -59,6 +59,18 @@ public:
 	template <typename T>
 	const T* GetDataAsset(const FName& RecordName);
 	template <typename T>
-	static void ForeachDataAsset(const TFunction<void(const T&)> Callback = nullptr);
+	static void ForeachDataAsset(const TFunction<void(const T&)> Callback = nullptr)
+	{
+		TArray<TSoftObjectPtr<T>> FoundAssets = T::GetLoadedAssets();
+		for (TSoftObjectPtr<T>& Asset : FoundAssets)
+		{
+			if (!Asset.IsValid())
+			{
+				continue;
+			}
+
+			Callback(*Asset);
+		}
+	}
 	static void ForeachEntity(UWorld* InWorld, TFunction<void(FNarrativeEntityInstance&)> Callback);
 };

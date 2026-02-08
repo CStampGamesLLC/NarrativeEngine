@@ -3,18 +3,49 @@
 
 #include "NarrativeSubsystem.h"
 
+/* Narrative data boilerplate
+ *
+ * 1. Scan the asset registry for data asset types and cache FAssetData in `UNarrativeDataSubsystem::NarrativeAssetData` for lazy loading from data asset typename
+ * 2. Call either:
+ *		a. UNarrativeSubsystem::ForeachDataAsset<UMyAssetType>([&](const UMyAssetType& EntityDef) 
+ *			as needed for iterating a class of assets
+ *		b. UNarrativeSubsystem::GetDataAsset<UMyAssetType>(const FName& AssetName) 
+ *			as needed for a particular asset
+ * 3. NARRATIVE_DATA_HELPERS is used by any child of UNarrativeDataAsset to facilitate the following methods provided typename T:
+ *		a. static TArray<FAssetData> GetAssetData()
+ *		b. static TArray<TSoftObjectPtr<T>> GetLoadedAssets()
+ */
+void UNarrativeDataSubsystem::RegisterNarrativeAssets(FAssetRegistryModule& AssetRegistryModule)
+{
+	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeBasisVector)
+	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEntityDef)
+	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEventDef)
+	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeDialogDef)
+}
+
+void UNarrativeDataSubsystem::OnAssetRegistryReady()
+{
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	RegisterNarrativeAssets(AssetRegistryModule);
+}
+
 void UNarrativeDataSubsystem::InitializeNarrativeAssetData()
 {
 	// 1. Get the Asset Registry module
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+	if (AssetRegistry.IsLoadingAssets() || AssetRegistry.IsGathering())
+	{
+		AssetRegistry.OnFilesLoaded().AddUObject(this, &UNarrativeDataSubsystem::OnAssetRegistryReady);
+		// Optionally kick search if needed:
+		if (!AssetRegistry.IsSearchAllAssets())
+		{
+			AssetRegistry.SearchAllAssets(/*bSynchronousSearch=*/false);
+		}
+		return;
+	}
 
-	// Make sure the registry is up to date; this is often necessary
-	// if you're running this code early in the game.
-	AssetRegistryModule.Get().SearchAllAssets(true);
-
-	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeBasisVector)
-	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEntityDef)
-	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEventDef)
+	RegisterNarrativeAssets(AssetRegistryModule);
 }
 
 void UNarrativeDataSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -39,7 +70,7 @@ void UNarrativeSubsystem::RegisterEntity(const UNarrativeEntityDef& InEntityDef)
 	{
 		return;
 	}
-	
+
 	Scene.Entities.Emplace(InEntityDef);
 }
 
@@ -80,7 +111,7 @@ void UNarrativeSubsystem::SimulateEntities(float DeltaTime)
 			{
 				continue;
 			}
-			
+
 			ApplyGravity(EntityA, EntityB, GravConstant);
 		}
 	}
@@ -102,7 +133,7 @@ void UNarrativeSubsystem::Tick(float DeltaTime)
 
 	// Apply gravitational forces between entities
 	SimulateEntities(DeltaTime);
-	
+
 	WaveFunctionCollapse();
 }
 
@@ -111,9 +142,9 @@ void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrati
 	UNarrativeSubsystem* NarrativeSubsystem = InWorld->GetSubsystem<UNarrativeSubsystem>();
 	if (!ensure(IsValid(InWorld)))
 	{
-		return; 
+		return;
 	}
-	
+
 	for (FNarrativeEntityInstance& Entity : NarrativeSubsystem->Scene.Entities)
 	{
 		Callback(Entity);
@@ -121,7 +152,7 @@ void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrati
 }
 
 // Simulate curvature-based gravity between two entities
-void  UNarrativeSubsystem::ApplyGravity(FNarrativeEntityInstance& A, FNarrativeEntityInstance& B, double G)
+void UNarrativeSubsystem::ApplyGravity(FNarrativeEntityInstance& A, FNarrativeEntityInstance& B, double G)
 {
 	FVectorND Direction;
 	double Distance = A.Position.Distance(B.Position);
@@ -146,17 +177,18 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 {
 	//cstamper todo - optimize FVectorND construction so that it's usable
 	FVectorND NewPosition;
-	
+
 	if (!ensure(NewPosition.Num() == Entity.Position.Num()))
 	{
 		return;
 	}
-	
+
 	for (int i = 0; i < Entity.Position.Num(); ++i)
 	{
 		// Verlet position update
-		NewPosition[i] = 2 * Entity.Position[i] - Entity.OldPosition[i] + Entity.Acceleration[i] * DeltaTime * DeltaTime;
-	
+		NewPosition[i] = 2 * Entity.Position[i] - Entity.OldPosition[i] + Entity.Acceleration[i] * DeltaTime *
+			DeltaTime;
+
 		// Update previous position for the next iteration
 		Entity.OldPosition[i] = Entity.Position[i];
 		Entity.Position[i] = NewPosition[i];
@@ -175,7 +207,7 @@ void UNarrativeSubsystem::WaveFunctionCollapse()
 		{
 			continue;
 		}
-		
+
 		// todo this isn't right... needs some work. This needs to select some action, which could be a dialog
 		float CollapseProbability = exp(-Entity.Asset->ShannonEntropyRadius);
 		if (FMath::RandRange(0.0f, 1.0f) < CollapseProbability)
@@ -188,22 +220,6 @@ void UNarrativeSubsystem::WaveFunctionCollapse()
 #pragma endregion
 
 #pragma region Tools
-
-template <typename T>
-void UNarrativeSubsystem::ForeachDataAsset(const TFunction<void(const T&)> Callback)
-{
-	TArray<TSoftObjectPtr<T>> FoundAssets = T::GetLoadedAssets();
-	for (TSoftObjectPtr<T>& Asset : FoundAssets)
-	{
-		if (!Asset.IsValid())
-		{
-			continue;
-		}
-
-		Callback(*Asset);
-	}
-}
-
 template <typename T>
 const T* UNarrativeSubsystem::GetDataAsset(const FName& RecordName)
 {

@@ -10,6 +10,8 @@ class UNarrativeDataSubsystem : public UEngineSubsystem
 	GENERATED_BODY()
 
 public:
+	void RegisterNarrativeAssets(FAssetRegistryModule& AssetRegistryModule);
+	void OnAssetRegistryReady();
 	void InitializeNarrativeAssetData();
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
