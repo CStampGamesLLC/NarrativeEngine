@@ -23,8 +23,6 @@ void UNarrativeEntityComponent::BeginPlay()
 	Super::BeginPlay();
 
 	RegisterWithRuntime();
-	// ...
-	
 }
 
 void UNarrativeEntityComponent::RegisterWithRuntime()
@@ -41,8 +39,13 @@ void UNarrativeEntityComponent::RegisterWithRuntime()
 	}
 
 	NarrativeSubsystem->RegisterEntity(*EntityDef);
+	NarrativeSubsystem->OnLocationChangeDelegates.FindOrAdd(EntityDef.Get()).AddUObject(this, &UNarrativeEntityComponent::HandleLocationChanged);
 }
 
+void UNarrativeEntityComponent::HandleLocationChanged(const FVectorND& NewLocation)
+{
+	OnLocationChanged.Broadcast(NewLocation);
+}
 
 // Called every frame
 void UNarrativeEntityComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -67,6 +70,23 @@ FVectorND UNarrativeEntityComponent::GetLocation() const
 	}
 	
 	return EntityInstance->Position;
+}
+
+FVectorND UNarrativeEntityComponent::GetOldLocation() const
+{
+	UNarrativeSubsystem* NarrativeSubsystem = GetWorld()->GetSubsystem<UNarrativeSubsystem>();
+	if (!IsValid(NarrativeSubsystem))
+	{
+		return {};
+	}
+
+	FNarrativeEntityInstance* EntityInstance = NarrativeSubsystem->Scene.Entities.Find(*EntityDef);
+	if (!EntityInstance)
+	{
+		return {};
+	}
+	
+	return EntityInstance->OldPosition;
 }
 
 float UNarrativeEntityComponent::GetAlignmentTo(const UNarrativeEntityDef& InEntityDef)

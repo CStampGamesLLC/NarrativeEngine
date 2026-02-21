@@ -3,9 +3,9 @@
 
 FNarrativeEntityInstance::FNarrativeEntityInstance(const UNarrativeEntityDef& EntityDef)
 {
+	Asset = &EntityDef;
 	Name = EntityDef.Name;
 	Mass = EntityDef.Mass;
-
 
 	TArray<TSoftObjectPtr<UNarrativeBasisVector>> BasisVectors = UNarrativeBasisVector::GetLoadedAssets();
 
@@ -16,6 +16,7 @@ FNarrativeEntityInstance::FNarrativeEntityInstance(const UNarrativeEntityDef& En
 		const float* Coord = EntityDef.StartingCoordinates.Find(BasisVectors[i]);
 		if (!Coord)
 		{
+			Position[i] = 0.0f;
 			continue;
 		}
 

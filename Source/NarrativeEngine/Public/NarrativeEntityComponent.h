@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "NarrativeStaticData.h"
+#include "NarrativeSubsystem.h"
 #include "Components/ActorComponent.h"
 #include "NarrativeEntityComponent.generated.h"
 
@@ -22,6 +23,7 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 	virtual void RegisterWithRuntime();
+	virtual void HandleLocationChanged(const FVectorND& NewLocation);
 
 public:
 	// Called every frame
@@ -29,9 +31,12 @@ public:
 
 	/* The static data record that defines this entities properties when initializing the runtime */
 	UPROPERTY(EditAnywhere)
-	TSoftObjectPtr<UNarrativeEntityDef> EntityDef;
+	TSoftObjectPtr<const UNarrativeEntityDef> EntityDef;
 
 	FVectorND GetLocation() const;
+	FVectorND GetOldLocation() const;
+	
+	FOnLocationChangeDelegate OnLocationChanged;
 
 	/*
 	 * Alignment a product of goal and progress angles between two entities. ??

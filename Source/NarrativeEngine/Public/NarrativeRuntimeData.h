@@ -22,7 +22,7 @@ struct FNarrativeComponent
  */
 struct FNarrativeEntityInstance
 {
-	TSoftObjectPtr<UNarrativeEntityDef> Asset;
+	TWeakObjectPtr<const UNarrativeEntityDef> Asset;
 	
 	FVectorND Position;  // Current position
 	FVectorND OldPosition; // Previous position for Verlet integration

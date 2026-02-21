@@ -93,7 +93,7 @@ struct FVectorND : public TArray<float>
 	
 	const float& operator[](const UNarrativeBasisVector& BasisVector) const
 	{
-		const int Index = static_cast<int>(BasisVector); 
+		const int Index = UNarrativeBasisVector::GetLoadedAssets().IndexOfByKey(&BasisVector);
 		RangeCheck(Index);
 		return GetData()[Index];
 	}
@@ -130,5 +130,15 @@ struct FVectorND : public TArray<float>
 	        Result += GetData()[i] * Other[i];
 	    }
 	    return Result;
+	}
+
+	FVectorND operator*(double X) const
+	{
+		FVectorND Result = *this;
+		for (int i = 0; i < Num(); ++i)
+		{
+			Result[i] *= X;
+		}
+		return Result;
 	}
 };

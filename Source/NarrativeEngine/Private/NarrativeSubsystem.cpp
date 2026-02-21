@@ -1,7 +1,14 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "NarrativeSubsystem.h"
+
+static TAutoConsoleVariable<float> CVarNarrativeTelosStrength(
+	TEXT("db.Narrative.TelosStrength"),
+	1.f,
+	TEXT("Strength multiplier applied to narrative Telos acceleration.\n")
+	TEXT("0 = no goal pull, 1 = default, >1 = aggressive convergence."),
+	ECVF_Default
+);
 
 /* Narrative data boilerplate
  *
@@ -95,33 +102,47 @@ void UNarrativeSubsystem::InitEntities()
 {
 	ForeachDataAsset<UNarrativeEntityDef>([this](const UNarrativeEntityDef& EntityDef)
 	{
-		// Scene.Entities.Emplace(FNarrativeEntityInstance{EntityDef});
+		FSetElementId EntityId = Scene.Entities.Add(FNarrativeEntityInstance{EntityDef});
+		FNarrativeEntityInstance& Entity = Scene.Entities[EntityId];
+		
+		// Telos is where the entity tends to drift (this is the effective inertial force of the entity)
+		// The Telos of an Acorn is to move into its reality vector as a tree; it's stubborness. 
+		// The state vectors this tends towards can affect behaviors, gameplay, aesthetics, etc.
+		Entity.Telos = Entity.Position;
 	});
+}
+
+void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity, float DeltaTime)
+{
+	Entity.Acceleration = Entity.Telos;// * CVarNarrativeTelosStrength.GetValueOnGameThread();
+	
+	// cstamper todo try this instead when it's for real... maybe CVar it
+	//const FVectorND x = Entity.Position;
+	//const FVectorND goal = Entity.Telos;               // interpret as goal location OR goal direction
+	//const FVectorND dir = (goal - x);
+
+	//Entity.Acceleration = dir.GetSafeNormal() * Entity.TelosStrength; // or proportional without normalize
 }
 #pragma endregion
 
 #pragma region Runtime
 void UNarrativeSubsystem::SimulateEntities(float DeltaTime)
 {
-	for (FNarrativeEntityInstance& EntityA : Scene.Entities)
-	{
-		for (FNarrativeEntityInstance EntityB : Scene.Entities)
-		{
-			if (EntityA == EntityB)
-			{
-				continue;
-			}
-
-			ApplyGravity(EntityA, EntityB, GravConstant);
-		}
-	}
-
 	for (FNarrativeEntityInstance& Entity : Scene.Entities)
 	{
-		for (int Step = 0; Step < 20; ++Step)
+		// Accumulate forces
+		CalculateAcceleration(Entity, DeltaTime);
+		
+		// Simulate movement & forces 
+		VerletIntegrate(Entity, DeltaTime);
+		
+		if (Entity.Position != Entity.OldPosition)
 		{
-			// Simulate movement & forces 
-			VerletIntegrate(Entity, DeltaTime);
+			FOnLocationChangeDelegate* ChangeDelegate = OnLocationChangeDelegates.Find(Entity.Asset.Get());
+			if (ChangeDelegate)
+			{
+				ChangeDelegate->Broadcast(Entity.Position);
+			}
 		}
 	}
 }
@@ -151,27 +172,6 @@ void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrati
 	}
 }
 
-// Simulate curvature-based gravity between two entities
-void UNarrativeSubsystem::ApplyGravity(FNarrativeEntityInstance& A, FNarrativeEntityInstance& B, double G)
-{
-	FVectorND Direction;
-	double Distance = A.Position.Distance(B.Position);
-	double ForceMagnitude = G * A.Mass * B.Mass / (Distance * Distance + 0.1); // Regularize for small distances
-
-	// Compute the force vector
-	for (int i = 0; i < Direction.Num(); ++i)
-	{
-		Direction[i] = (B.Position[i] - A.Position[i]) / Distance;
-	}
-
-	// Apply the force
-	for (int i = 0; i < Direction.Num(); ++i)
-	{
-		A.Acceleration[i] += ForceMagnitude * Direction[i] / A.Mass;
-		B.Acceleration[i] -= ForceMagnitude * Direction[i] / B.Mass; // Equal and opposite
-	}
-}
-
 // Verlet integration step - in effect, this is the core runtime for the partical physics simulation of narrative entities
 void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, double DeltaTime)
 {
@@ -186,16 +186,13 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 	for (int i = 0; i < Entity.Position.Num(); ++i)
 	{
 		// Verlet position update
-		NewPosition[i] = 2 * Entity.Position[i] - Entity.OldPosition[i] + Entity.Acceleration[i] * DeltaTime *
-			DeltaTime;
+		const float Velocity = Entity.OldPosition[i] - Entity.Position[i];
+		const float Acceleration = Entity.Acceleration[i];
+		NewPosition[i] = Entity.Position[i] + Velocity + Acceleration * DeltaTime * DeltaTime;
 
 		// Update previous position for the next iteration
 		Entity.OldPosition[i] = Entity.Position[i];
 		Entity.Position[i] = NewPosition[i];
-
-		// todo consider implementing a dampening factor 
-		// Reset acceleration
-		Entity.Acceleration[i] = 0.0;
 	}
 }
 

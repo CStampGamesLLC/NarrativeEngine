@@ -10,6 +10,7 @@
 #include "NarrativeSubsystem.generated.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnEntitySpawned, FNarrativeEntityInstance&)
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnLocationChangeDelegate, const FVectorND&)
 
 /*
  * Narrative subsystem for keeping score of narrative engagement for all entities from characters to items
@@ -37,6 +38,8 @@ class NARRATIVEENGINE_API UNarrativeSubsystem : public UTickableWorldSubsystem
 public:
 	void RegisterEntity(const UNarrativeEntityDef& InEntityDef);
 	
+	TMap<TWeakObjectPtr<const UNarrativeEntityDef>, FOnLocationChangeDelegate> OnLocationChangeDelegates;
+	
 public:
 	// Setup
 	virtual TStatId GetStatId() const override;
@@ -44,9 +47,9 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	void InitEntities();
+	void CalculateAcceleration(FNarrativeEntityInstance& Entity, float DeltaTime);
 	void SimulateEntities(float DeltaTime);
-	static void ApplyGravity(FNarrativeEntityInstance& A, FNarrativeEntityInstance& B, double G);
-	static void VerletIntegrate(FNarrativeEntityInstance& Entity, double DeltaTime);
+	void VerletIntegrate(FNarrativeEntityInstance& Entity, double DeltaTime);
 
 	FOnEntitySpawned OnEntitySpawned;
 	void WaveFunctionCollapse();
