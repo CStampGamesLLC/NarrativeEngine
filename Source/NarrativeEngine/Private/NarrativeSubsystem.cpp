@@ -4,7 +4,7 @@
 
 static TAutoConsoleVariable<float> CVarNarrativeTelosStrength(
 	TEXT("db.Narrative.TelosStrength"),
-	1.f,
+	0.1f,
 	TEXT("Strength multiplier applied to narrative Telos acceleration.\n")
 	TEXT("0 = no goal pull, 1 = default, >1 = aggressive convergence."),
 	ECVF_Default
@@ -114,7 +114,7 @@ void UNarrativeSubsystem::InitEntities()
 
 void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity, float DeltaTime)
 {
-	Entity.Acceleration = Entity.Telos;// * CVarNarrativeTelosStrength.GetValueOnGameThread();
+	//Entity.Acceleration = Entity.Telos * DeltaTime;// * CVarNarrativeTelosStrength.GetValueOnGameThread();
 	
 	// cstamper todo try this instead when it's for real... maybe CVar it
 	//const FVectorND x = Entity.Position;
@@ -128,6 +128,8 @@ void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity
 #pragma region Runtime
 void UNarrativeSubsystem::SimulateEntities(float DeltaTime)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::SimulateEntities)
+	
 	for (FNarrativeEntityInstance& Entity : Scene.Entities)
 	{
 		// Accumulate forces
@@ -149,6 +151,8 @@ void UNarrativeSubsystem::SimulateEntities(float DeltaTime)
 
 void UNarrativeSubsystem::Tick(float DeltaTime)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::Tick)
+	
 	Super::Tick(DeltaTime);
 	Scene.Tick(DeltaTime);
 
@@ -175,6 +179,8 @@ void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrati
 // Verlet integration step - in effect, this is the core runtime for the partical physics simulation of narrative entities
 void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, double DeltaTime)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::VerletIntegrate)
+	
 	//cstamper todo - optimize FVectorND construction so that it's usable
 	FVectorND NewPosition;
 
@@ -186,7 +192,7 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 	for (int i = 0; i < Entity.Position.Num(); ++i)
 	{
 		// Verlet position update
-		const float Velocity = Entity.OldPosition[i] - Entity.Position[i];
+		const float Velocity = Entity.Position[i] - Entity.OldPosition[i];
 		const float Acceleration = Entity.Acceleration[i];
 		NewPosition[i] = Entity.Position[i] + Velocity + Acceleration * DeltaTime * DeltaTime;
 
