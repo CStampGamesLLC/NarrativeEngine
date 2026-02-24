@@ -31,27 +31,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> PreviousCoordinates;
 
-#pragma region Narrative Engine Encounter
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Location;
+	double Mass = 1.f;
 
-	/* todo implment IEncounter interface for items that are selected via wave function collapse */
-	// todo make this an array of forces (need an embedded structure)
+	/* units: force per unit distance if you're treating this as force. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Force;
-
-	/* Distribution of information (i.e. analog to energy) for an entity*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float ShannonEntropyRadius;
-
-	/* Curvature imposed on the state space */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float RadialFalloffExponent;
-#pragma endregion
-
+	double Stiffness = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	double Mass;
+	double Damping = 1.f;
 
 	NARRATIVE_DATA_HELPERS(UNarrativeEntityDef)
 };

@@ -35,6 +35,9 @@ struct FNarrativeEntityInstance
 	
 	/* Where entities path to (when pathable). Motives can become unreachable, but new motives can be acquired */
 	FVectorND Motive;
+	
+	/* Forces to be applied to this entity - flushed each tick */
+	TArray<FVectorND> QueuedImpulseForces;
 
 	FNarrativeEntityInstance(const UNarrativeEntityDef& EntityDef);
 

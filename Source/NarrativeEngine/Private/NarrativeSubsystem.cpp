@@ -114,16 +114,37 @@ void UNarrativeSubsystem::InitEntities()
 	});
 }
 
+// Acceleration = Force / Mass
 void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity, float DeltaTime)
 {
-	//Entity.Acceleration = Entity.Telos * DeltaTime;// * CVarNarrativeTelosStrength.GetValueOnGameThread();
-	
-	// cstamper todo try this instead when it's for real... maybe CVar it
-	//const FVectorND x = Entity.Position;
-	//const FVectorND goal = Entity.Telos;               // interpret as goal location OR goal direction
-	//const FVectorND dir = (goal - x);
+	if (!ensure(Entity.Asset.IsValid()))
+	{
+		return;
+	}
 
-	//Entity.Acceleration = dir.GetSafeNormal() * Entity.TelosStrength; // or proportional without normalize
+	// Accumulate forces
+	FVectorND ForceSum; 
+	for (const FVectorND& ImpulseForce : Entity.QueuedImpulseForces)
+	{
+		ForceSum += ImpulseForce;
+	}
+	Entity.QueuedImpulseForces.Reset();
+
+	// Spring-like stiffness - proportional to displacement
+	const FVectorND ToTelos = (Entity.Telos - Entity.Position);
+	const float Stiffness = Entity.Asset->Stiffness; 
+	ForceSum += ToTelos * Stiffness;
+
+	// Damping
+	if (DeltaTime > KINDA_SMALL_NUMBER)
+	{
+		const FVectorND Velocity = (Entity.Position - Entity.OldPosition) / DeltaTime;
+		const float Damping = Entity.Asset->Damping;
+		ForceSum += Velocity * -Damping;
+	}
+
+	const float Mass = FMath::Max(Entity.Asset->Mass, 1.f);
+	Entity.Acceleration = ForceSum / Mass;
 }
 #pragma endregion
 
@@ -195,6 +216,9 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 		// Update previous position for the next iteration
 		Entity.OldPosition[i] = Entity.Position[i];
 		Entity.Position[i] = NewPosition[i];
+		
+		// Reset acceleration
+		Entity.Acceleration[i] = 0.f;
 	}
 }
 
@@ -202,18 +226,18 @@ void UNarrativeSubsystem::WaveFunctionCollapse()
 {
 	for (FNarrativeEntityInstance& Entity : Scene.Entities)
 	{
-		if (!Entity.Asset.IsValid())
-		{
-			continue;
-		}
+		// if (!Entity.Asset.IsValid())
+		// {
+		// 	continue;
+		// }
 
 		// todo this isn't right... needs some work. This needs to select some action, which could be a dialog
-		float CollapseProbability = exp(-Entity.Asset->ShannonEntropyRadius);
-		if (FMath::RandRange(0.0f, 1.0f) < CollapseProbability)
-		{
-			// Instantiate entity in the gameplay layer
-			OnEntitySpawned.Broadcast(Entity);
-		}
+		//float CollapseProbability = exp(-Entity.Asset->ShannonEntropyRadius);
+		// if (FMath::RandRange(0.0f, 1.0f) < CollapseProbability)
+		// {
+		// 	// Instantiate entity in the gameplay layer
+		// 	OnEntitySpawned.Broadcast(Entity);
+		// }
 	}
 }
 

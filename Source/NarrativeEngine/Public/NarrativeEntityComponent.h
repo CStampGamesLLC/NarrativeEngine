@@ -35,6 +35,7 @@ public:
 
 	FVectorND GetLocation() const;
 	FVectorND GetOldLocation() const;
+	FNarrativeEntityInstance* GetInstance();
 	
 	FOnLocationChangeDelegate OnLocationChanged;
 

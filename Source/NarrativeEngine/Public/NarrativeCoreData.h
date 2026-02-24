@@ -83,62 +83,223 @@ inline uint32 GetClassHash<UNarrativeBasisVector>()
 	return GetTypeHash(UNarrativeBasisVector::StaticClass());
 }
 
-/* N Dimensional vector*/
+/* N Dimensional vector */
 struct FVectorND : public TArray<float>
 {
+	// Match FVector::GetSafeNormal default-ish tolerance (but in squared-space).
+	static constexpr float DefaultSafeNormalTolerance = 1.e-8f;
+
 	FVectorND()
 	{
-		SetNum(UNarrativeBasisVector::Num());
+		SetNumZeroed(UNarrativeBasisVector::Num());
 	}
-	
+
+	explicit FVectorND(int32 InNum)
+	{
+		SetNumZeroed(InNum);
+	}
+
+	explicit FVectorND(float InMagnitude) : FVectorND()
+	{
+		float* RESTRICT Data = GetData();
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			Data[i] = InMagnitude;
+		}
+	}
+
+	// --- Indexing ------------------------------------------------------------
+
 	const float& operator[](const UNarrativeBasisVector& BasisVector) const
 	{
-		const int Index = UNarrativeBasisVector::GetLoadedAssets().IndexOfByKey(&BasisVector);
+		const int32 Index = UNarrativeBasisVector::GetLoadedAssets().IndexOfByKey(&BasisVector);
 		RangeCheck(Index);
 		return GetData()[Index];
 	}
 
-	const float& operator[](const int& Index) const
+	float& operator[](const UNarrativeBasisVector& BasisVector)
+	{
+		const int32 Index = UNarrativeBasisVector::GetLoadedAssets().IndexOfByKey(&BasisVector);
+		RangeCheck(Index);
+		return GetData()[Index];
+	}
+
+	const float& operator[](int32 Index) const
 	{
 		RangeCheck(Index);
 		return GetData()[Index];
 	}
 
-	float& operator[](const int& Index)
+	float& operator[](int32 Index)
 	{
 		RangeCheck(Index);
 		return GetData()[Index];
 	}
 
-	// Helper function to calculate the distance in n-dimensional space
-	float Distance(const FVectorND& Other) const
+	// --- Metrics -------------------------------------------------------------
+
+	float LengthSquared() const
 	{
-		float Sum = 0.0;
-		for (int i = 0; i < Num(); ++i)
+		float Sum = 0.0f;
+		const float* RESTRICT Data = GetData();
+		for (int32 i = 0; i < Num(); ++i)
 		{
-			Sum += FMath::Pow(GetData()[i] - Other[i], 2);
+			Sum += Data[i] * Data[i];
+		}
+		return Sum;
+	}
+
+	float Length() const
+	{
+		return FMath::Sqrt(LengthSquared());
+	}
+
+	FVectorND GetSafeNormal(float Tolerance = DefaultSafeNormalTolerance) const
+	{
+		const float LenSq = LengthSquared();
+		if (LenSq > Tolerance)
+		{
+			const float InvLen = FMath::InvSqrt(LenSq);
+			return (*this) * InvLen;
 		}
 
+		FVectorND Zero(Num());
+		// already zeroed by ctor
+		return Zero;
+	}
+
+	// --- Distance / Dot ------------------------------------------------------
+
+	float Distance(const FVectorND& Other) const
+	{
+		check(Num() == Other.Num());
+
+		float Sum = 0.0f;
+		const float* RESTRICT A = GetData();
+		const float* RESTRICT B = Other.GetData();
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			const float D = A[i] - B[i];
+			Sum += D * D;
+		}
 		return FMath::Sqrt(Sum);
 	}
 
 	float Dot(const FVectorND& Other) const
 	{
-	    float Result = 0.0;
-	    for(int i = 0; i < Num(); ++i)
-	    {
-	        Result += GetData()[i] * Other[i];
-	    }
-	    return Result;
-	}
+		check(Num() == Other.Num());
 
-	FVectorND operator*(double X) const
-	{
-		FVectorND Result = *this;
-		for (int i = 0; i < Num(); ++i)
+		float Result = 0.0f;
+		const float* RESTRICT A = GetData();
+		const float* RESTRICT B = Other.GetData();
+		for (int32 i = 0; i < Num(); ++i)
 		{
-			Result[i] *= X;
+			Result += A[i] * B[i];
 		}
 		return Result;
+	}
+
+	// --- Arithmetic: vector-vector ------------------------------------------
+
+	FVectorND operator+(const FVectorND& Other) const
+	{
+		check(Num() == Other.Num());
+
+		FVectorND Result(*this);
+		const float* RESTRICT B = Other.GetData();
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			Result[i] += B[i];
+		}
+		return Result;
+	}
+
+	FVectorND operator-(const FVectorND& Other) const
+	{
+		check(Num() == Other.Num());
+
+		FVectorND Result(*this);
+		const float* RESTRICT B = Other.GetData();
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			Result[i] -= B[i];
+		}
+		return Result;
+	}
+
+	FVectorND& operator+=(const FVectorND& Other)
+	{
+		check(Num() == Other.Num());
+
+		const float* RESTRICT B = Other.GetData();
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			GetData()[i] += B[i];
+		}
+		return *this;
+	}
+
+	FVectorND& operator-=(const FVectorND& Other)
+	{
+		check(Num() == Other.Num());
+
+		const float* RESTRICT B = Other.GetData();
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			GetData()[i] -= B[i];
+		}
+		return *this;
+	}
+
+	FVectorND operator-() const
+	{
+		FVectorND Result(*this);
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			Result[i] = -Result[i];
+		}
+		return Result;
+	}
+
+	// --- Arithmetic: vector-scalar ------------------------------------------
+
+	FVectorND operator*(float Scalar) const
+	{
+		FVectorND Result(*this);
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			Result[i] *= Scalar;
+		}
+		return Result;
+	}
+
+	FVectorND operator/(float Scalar) const
+	{
+		check(!FMath::IsNearlyZero(Scalar));
+
+		const float Inv = 1.0f / Scalar;
+		return (*this) * Inv;
+	}
+
+	FVectorND& operator*=(float Scalar)
+	{
+		for (int32 i = 0; i < Num(); ++i)
+		{
+			GetData()[i] *= Scalar;
+		}
+		return *this;
+	}
+
+	FVectorND& operator/=(float Scalar)
+	{
+		check(!FMath::IsNearlyZero(Scalar));
+
+		const float Inv = 1.0f / Scalar;
+		return (*this) *= Inv;
+	}
+
+	friend FVectorND operator*(float Scalar, const FVectorND& V)
+	{
+		return V * Scalar;
 	}
 };

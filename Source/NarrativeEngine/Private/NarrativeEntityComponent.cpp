@@ -89,6 +89,17 @@ FVectorND UNarrativeEntityComponent::GetOldLocation() const
 	return EntityInstance->OldPosition;
 }
 
+FNarrativeEntityInstance* UNarrativeEntityComponent::GetInstance()
+{
+	UNarrativeSubsystem* NarrativeSubsystem = GetWorld()->GetSubsystem<UNarrativeSubsystem>();
+	if (!IsValid(NarrativeSubsystem))
+	{
+		return nullptr;
+	}
+	
+	return NarrativeSubsystem->Scene.Entities.Find(*EntityDef);
+}
+
 float UNarrativeEntityComponent::GetAlignmentTo(const UNarrativeEntityDef& InEntityDef)
 {
 	return 0.f;

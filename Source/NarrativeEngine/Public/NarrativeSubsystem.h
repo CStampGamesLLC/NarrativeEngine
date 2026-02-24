@@ -37,9 +37,9 @@ class NARRATIVEENGINE_API UNarrativeSubsystem : public UTickableWorldSubsystem
 #pragma region Convert to config
 	
 	/* Accumulated distance delta required to trigger a broadcast */
-	const float EntityDistanceBroadcastThreshold = 0.1f;
+	const float EntityDistanceBroadcastThreshold = 0.067f;
 	/* Timer to trigger an immediate broadcast */
-	const float EntityDeltaBroadcastInterval = 0.5f;
+	const float EntityDeltaBroadcastInterval = 0.35f;
 	
 #pragma endregion
 	
