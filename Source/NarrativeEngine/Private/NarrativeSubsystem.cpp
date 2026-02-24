@@ -109,6 +109,8 @@ void UNarrativeSubsystem::InitEntities()
 		// The Telos of an Acorn is to move into its reality vector as a tree; it's stubborness. 
 		// The state vectors this tends towards can affect behaviors, gameplay, aesthetics, etc.
 		Entity.Telos = Entity.Position;
+		// Zero out velocity (which is derived from old - new positions). 
+		Entity.OldPosition = Entity.Position;
 	});
 }
 
