@@ -138,14 +138,8 @@ void UNarrativeSubsystem::SimulateEntities(float DeltaTime)
 		// Simulate movement & forces 
 		VerletIntegrate(Entity, DeltaTime);
 		
-		if (Entity.Position != Entity.OldPosition)
-		{
-			FOnLocationChangeDelegate* ChangeDelegate = OnLocationChangeDelegates.Find(Entity.Asset.Get());
-			if (ChangeDelegate)
-			{
-				ChangeDelegate->Broadcast(Entity.Position);
-			}
-		}
+		// Broadcast to listeners
+		BroadcastEntityDelta(Entity, DeltaTime);
 	}
 }
 
@@ -218,6 +212,32 @@ void UNarrativeSubsystem::WaveFunctionCollapse()
 			// Instantiate entity in the gameplay layer
 			OnEntitySpawned.Broadcast(Entity);
 		}
+	}
+}
+
+void UNarrativeSubsystem::BroadcastEntityDelta(const FNarrativeEntityInstance& Entity, const float DeltaTime)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::BroadcastEntityDelta)
+	
+	FOnLocationChangeDelegate* ChangeDelegate = OnLocationChangeDelegates.Find(Entity.Asset.Get());
+	if (!ChangeDelegate)
+	{
+		return;
+	}
+	
+	// Delta check time
+	EntityDeltaBroadcastTimer += DeltaTime;
+	const bool bTimerIntervalElapsed = EntityDeltaBroadcastTimer >= EntityDeltaBroadcastInterval;
+		
+	// Delta check distance
+	const float DistanceDelta = Entity.Position.Distance(Entity.OldPosition);
+	const bool bSufficientDistance =  DistanceDelta > EntityDistanceBroadcastThreshold;
+		
+	// Broadcast
+	if (bTimerIntervalElapsed && bSufficientDistance)
+	{
+		EntityDeltaBroadcastTimer = 0.f;
+		ChangeDelegate->Broadcast(Entity.Position);
 	}
 }
 #pragma endregion

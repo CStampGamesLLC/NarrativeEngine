@@ -34,9 +34,24 @@ class NARRATIVEENGINE_API UNarrativeSubsystem : public UTickableWorldSubsystem
 {
 	GENERATED_BODY()
 
+#pragma region Convert to config
+	
+	/* Accumulated distance delta required to trigger a broadcast */
+	const float EntityDistanceBroadcastThreshold = 0.1f;
+	/* Timer to trigger an immediate broadcast */
+	const float EntityDeltaBroadcastInterval = 0.5f;
+	
+#pragma endregion
+	
+#pragma region EngineMethods
+public:
+	virtual void Tick(float DeltaTime) override;
+#pragma endregion
+	
 	// Actual public API
 public:
 	void RegisterEntity(const UNarrativeEntityDef& InEntityDef);
+	static void ForeachEntity(UWorld* InWorld, TFunction<void(FNarrativeEntityInstance&)> Callback);
 	
 	TMap<TWeakObjectPtr<const UNarrativeEntityDef>, FOnLocationChangeDelegate> OnLocationChangeDelegates;
 	
@@ -46,19 +61,12 @@ public:
 	
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
-	void InitEntities();
-	void CalculateAcceleration(FNarrativeEntityInstance& Entity, float DeltaTime);
-	void SimulateEntities(float DeltaTime);
-	void VerletIntegrate(FNarrativeEntityInstance& Entity, double DeltaTime);
+
 
 	FOnEntitySpawned OnEntitySpawned;
 	void WaveFunctionCollapse();
 	
 	// Runtime
-	virtual void Tick(float DeltaTime) override;
-
-	FNarrativeScene Scene;
-	
 	template <typename T>
 	const T* GetDataAsset(const FName& RecordName);
 	template <typename T>
@@ -75,5 +83,19 @@ public:
 			Callback(*Asset);
 		}
 	}
-	static void ForeachEntity(UWorld* InWorld, TFunction<void(FNarrativeEntityInstance&)> Callback);
+	
+#pragma region Internal Methods
+	
+	void InitEntities();
+	void CalculateAcceleration(FNarrativeEntityInstance& Entity, float DeltaTime);
+	void SimulateEntities(float DeltaTime);
+	void VerletIntegrate(FNarrativeEntityInstance& Entity, double DeltaTime);
+	void BroadcastEntityDelta(const FNarrativeEntityInstance& Entity, const float DeltaTime);
+	
+#pragma endregion
+	
+#pragma region Internal State
+	FNarrativeScene Scene;
+	float EntityDeltaBroadcastTimer = 0.f;
+#pragma endregion
 };
