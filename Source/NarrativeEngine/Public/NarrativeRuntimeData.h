@@ -26,6 +26,8 @@ struct FNarrativeEntityInstance
 	
 	FVectorND Position;  // Current position
 	FVectorND OldPosition; // Previous position for Verlet integration
+	FVectorND LastBroadcastPosition;
+	float EntityDeltaBroadcastTimer = 0.f;
 	FVectorND Acceleration; // Accumulated acceleration
 	FName Name; // For thematic association
 	double Mass;  // Mass of the entity, effectively their "conviction" or potential impact on peoples' inherited will

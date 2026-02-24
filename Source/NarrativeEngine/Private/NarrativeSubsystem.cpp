@@ -122,25 +122,41 @@ void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity
 		return;
 	}
 
-	// Accumulate forces
-	FVectorND ForceSum; 
-	for (const FVectorND& ImpulseForce : Entity.QueuedImpulseForces)
+	FVectorND ForceSum; // zeroed
+
+	// External forces (again: these are "forces" unless you handle impulse semantics elsewhere)
+	for (const FVectorND& F : Entity.QueuedImpulseForces)
 	{
-		ForceSum += ImpulseForce;
+		ForceSum += F;
 	}
 	Entity.QueuedImpulseForces.Reset();
 
-	// Spring-like stiffness - proportional to displacement
-	const FVectorND ToTelos = (Entity.Telos - Entity.Position);
-	const float Stiffness = Entity.Asset->Stiffness; 
-	ForceSum += ToTelos * Stiffness;
-
-	// Damping
 	if (DeltaTime > KINDA_SMALL_NUMBER)
 	{
+		// Verlet velocity estimate
 		const FVectorND Velocity = (Entity.Position - Entity.OldPosition) / DeltaTime;
-		const float Damping = Entity.Asset->Damping;
-		ForceSum += Velocity * -Damping;
+
+		// Immutable "telos direction" (preferred direction of motion)
+		const FVectorND TelosDir = Entity.Telos.GetSafeNormal();
+		if (TelosDir.LengthSquared() > 0.f)
+		{
+			// Decompose velocity into parallel/perp relative to TelosDir
+			const float VParallelMag = Velocity.Dot(TelosDir);
+			const FVectorND VParallel = TelosDir * VParallelMag;
+			const FVectorND VPerp = Velocity - VParallel;
+
+			// 1) Alignment: damp perpendicular motion (makes it "want" to move along Telos)
+			const float Align = FMath::Max(0.f, Entity.Asset->Alignment); // new param
+			ForceSum += VPerp * (-Align);
+
+			// 2) Drift: constant push along Telos (the "tends to drift" part)
+			const float Drift = Entity.Asset->Drift; // can be +/- to reverse
+			ForceSum += TelosDir * Drift;
+		}
+
+		// Optional generic damping (overall)
+		const float Damping = FMath::Max(0.f, Entity.Asset->Damping);
+		ForceSum += Velocity * (-Damping);
 	}
 
 	const float Mass = FMath::Max(Entity.Asset->Mass, 1.f);
@@ -153,16 +169,23 @@ void UNarrativeSubsystem::SimulateEntities(float DeltaTime)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::SimulateEntities)
 	
-	for (FNarrativeEntityInstance& Entity : Scene.Entities)
+	// Tick at a steady 60hz to prevent weird jumps/artifacts from odd DT values
+	FixedStepAccumulator += DeltaTime;
+	while (FixedStepAccumulator > FixedStepSize)
 	{
-		// Accumulate forces
-		CalculateAcceleration(Entity, DeltaTime);
+		FixedStepAccumulator -= FixedStepSize;
+	
+		for (FNarrativeEntityInstance& Entity : Scene.Entities)
+		{
+			// Accumulate forces
+			CalculateAcceleration(Entity, FixedStepSize);
 		
-		// Simulate movement & forces 
-		VerletIntegrate(Entity, DeltaTime);
+			// Simulate movement & forces 
+			VerletIntegrate(Entity, FixedStepSize);
 		
-		// Broadcast to listeners
-		BroadcastEntityDelta(Entity, DeltaTime);
+			// Broadcast to listeners
+			BroadcastEntityDelta(Entity, FixedStepSize);
+		}
 	}
 }
 
@@ -241,7 +264,7 @@ void UNarrativeSubsystem::WaveFunctionCollapse()
 	}
 }
 
-void UNarrativeSubsystem::BroadcastEntityDelta(const FNarrativeEntityInstance& Entity, const float DeltaTime)
+void UNarrativeSubsystem::BroadcastEntityDelta(FNarrativeEntityInstance& Entity, const float DeltaTime)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::BroadcastEntityDelta)
 	
@@ -252,17 +275,18 @@ void UNarrativeSubsystem::BroadcastEntityDelta(const FNarrativeEntityInstance& E
 	}
 	
 	// Delta check time
-	EntityDeltaBroadcastTimer += DeltaTime;
-	const bool bTimerIntervalElapsed = EntityDeltaBroadcastTimer >= EntityDeltaBroadcastInterval;
+	Entity.EntityDeltaBroadcastTimer += DeltaTime;
+	const bool bTimerIntervalElapsed = Entity.EntityDeltaBroadcastTimer >= EntityDeltaBroadcastInterval;
 		
 	// Delta check distance
-	const float DistanceDelta = Entity.Position.Distance(Entity.OldPosition);
+	const float DistanceDelta = Entity.Position.Distance(Entity.LastBroadcastPosition);
 	const bool bSufficientDistance =  DistanceDelta > EntityDistanceBroadcastThreshold;
 		
 	// Broadcast
-	if (bTimerIntervalElapsed && bSufficientDistance)
+	if (bTimerIntervalElapsed || bSufficientDistance)
 	{
-		EntityDeltaBroadcastTimer = 0.f;
+		Entity.LastBroadcastPosition = Entity.Position;
+		Entity.EntityDeltaBroadcastTimer = 0.f;
 		ChangeDelegate->Broadcast(Entity.Position);
 	}
 }

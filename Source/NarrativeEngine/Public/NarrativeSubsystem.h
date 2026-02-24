@@ -40,6 +40,8 @@ class NARRATIVEENGINE_API UNarrativeSubsystem : public UTickableWorldSubsystem
 	const float EntityDistanceBroadcastThreshold = 0.067f;
 	/* Timer to trigger an immediate broadcast */
 	const float EntityDeltaBroadcastInterval = 0.35f;
+	/* 60hz tick interval - prevents undefined behaviors from large/small delta times */
+	const float FixedStepSize = 0.016f;
 	
 #pragma endregion
 	
@@ -90,12 +92,12 @@ public:
 	void CalculateAcceleration(FNarrativeEntityInstance& Entity, float DeltaTime);
 	void SimulateEntities(float DeltaTime);
 	void VerletIntegrate(FNarrativeEntityInstance& Entity, double DeltaTime);
-	void BroadcastEntityDelta(const FNarrativeEntityInstance& Entity, const float DeltaTime);
+	void BroadcastEntityDelta(FNarrativeEntityInstance& Entity, const float DeltaTime);
 	
 #pragma endregion
 	
 #pragma region Internal State
 	FNarrativeScene Scene;
-	float EntityDeltaBroadcastTimer = 0.f;
+	float FixedStepAccumulator = 0.f;
 #pragma endregion
 };

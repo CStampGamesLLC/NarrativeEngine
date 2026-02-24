@@ -31,15 +31,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> PreviousCoordinates;
 
+	/* How resistent this entity is to external forces */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	double Mass = 1.f;
 
-	/* units: force per unit distance if you're treating this as force. */
+	/* Tendency to naturally progress along the entity's telos */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	double Stiffness = 1.f;
+	double Drift = 0.01f;
 
+	/* Resistence to forces that oppose the entity's telos */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	double Damping = 1.f;
+	double Alignment = 1.f;
+
+	/* Affects how quickly the entity comes to rest */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	double Damping = 10.f;
 
 	NARRATIVE_DATA_HELPERS(UNarrativeEntityDef)
 };
