@@ -37,7 +37,7 @@ public:
 
 	/* Tendency to naturally progress along the entity's telos */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	double Drift = 0.01f;
+	double Drift = 0.005f;
 
 	/* Resistence to forces that oppose the entity's telos */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -45,7 +45,7 @@ public:
 
 	/* Affects how quickly the entity comes to rest */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	double Damping = 10.f;
+	double Damping = 2.f;
 
 	NARRATIVE_DATA_HELPERS(UNarrativeEntityDef)
 };
