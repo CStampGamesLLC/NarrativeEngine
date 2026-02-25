@@ -108,6 +108,22 @@ struct FVectorND : public TArray<float>
 		}
 	}
 
+	// cstamper todo - replace this with something better... maybe a UHT plugin. 
+	/* These component maps are how FVectorND's are serialized to editor. */
+	explicit FVectorND(const TMap<TSoftObjectPtr<UNarrativeBasisVector>, float>& ComponentMap) : FVectorND()
+	{
+		for (const TTuple<TSoftObjectPtr<UNarrativeBasisVector>, float>& ComponentPair : ComponentMap)
+		{
+			UNarrativeBasisVector* BasisVector = ComponentPair.Key.Get();
+			if (!IsValid(BasisVector))
+			{
+				continue;
+			}
+			
+			(*this)[*BasisVector] = ComponentPair.Value;
+		}
+	}
+
 	// --- Indexing ------------------------------------------------------------
 
 	const float& operator[](const UNarrativeBasisVector& BasisVector) const
