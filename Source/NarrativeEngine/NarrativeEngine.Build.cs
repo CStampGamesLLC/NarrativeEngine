@@ -39,6 +39,7 @@ public class NarrativeEngine : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
+				"WaveFunctionCollapse",
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
