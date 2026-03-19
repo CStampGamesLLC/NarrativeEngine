@@ -16,7 +16,13 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 	template<typename T>
-	TArray<FAssetData> GetAssetData();
+	TArray<FAssetData> GetAssetData()
+	{
+		TArray<FAssetData> CachedAssetData;
+		const uint32 ClassHash = GetClassHash<T>();
+		NarrativeAssetData.MultiFind(ClassHash, CachedAssetData);
+		return CachedAssetData;
+	}
 	TMultiMap<uint32, FAssetData> NarrativeAssetData;
 
 	static int NumBasisVectors; 

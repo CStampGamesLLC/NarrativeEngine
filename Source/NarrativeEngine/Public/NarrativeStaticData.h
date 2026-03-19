@@ -117,5 +117,5 @@ public:
 template <>
 inline uint32 GetClassHash<UNarrativeDialogDef>()
 {
-	return GetTypeHash(UNarrativeActionDef::StaticClass());
+	return GetTypeHash(UNarrativeDialogDef::StaticClass());
 }

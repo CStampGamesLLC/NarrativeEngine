@@ -61,15 +61,6 @@ void UNarrativeDataSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	InitializeNarrativeAssetData();
 }
 
-template <typename T>
-TArray<FAssetData> UNarrativeDataSubsystem::GetAssetData()
-{
-	TArray<FAssetData> CachedAssetData;
-	const uint32 ClassHash = GetClassHash<T>();
-	NarrativeAssetData.MultiFind(ClassHash, CachedAssetData);
-	return CachedAssetData;
-}
-
 #pragma region Setup
 void UNarrativeSubsystem::RegisterEntity(const UNarrativeEntityDef& InEntityDef)
 {
