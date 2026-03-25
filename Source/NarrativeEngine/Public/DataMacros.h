@@ -15,7 +15,8 @@ static TArray<TSoftObjectPtr<T>> GetLoadedAssets()                              
 	TArray<TSoftObjectPtr<T>> LoadedAssets;                                                                                 					\
 	for (const FAssetData& Data : AssetData)                                                                                                    \
 	{                                                                                                                                           \
-		TSoftObjectPtr<T> LoadedAsset = Data.GetSoftObjectPath().TryLoad();                                                 					\
+		T* LoadedObject = Cast<T>(Data.GetSoftObjectPath().TryLoad());                                                       \
+		TSoftObjectPtr<T> LoadedAsset(LoadedObject);                                                                          \
 		if (!LoadedAsset.IsValid())                                                                                                             \
 		{                                                                                                                                       \
 			continue;                                                                                                                           \
@@ -60,5 +61,5 @@ operator int() const                                                            
 																				\
 for (FAssetData FoundAsset : T##FoundAssets)									\
 {																				\
-	NarrativeAssetData.Add(GetClassHash<T>(), FoundAsset);						\
+	NarrativeAssetData.Add(GetTypeHash(T::StaticClass()), FoundAsset);			\
 }

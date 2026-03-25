@@ -19,7 +19,7 @@ public:
 	TArray<FAssetData> GetAssetData()
 	{
 		TArray<FAssetData> CachedAssetData;
-		const uint32 ClassHash = GetClassHash<T>();
+		const uint32 ClassHash = GetTypeHash(T::StaticClass());
 		NarrativeAssetData.MultiFind(ClassHash, CachedAssetData);
 		return CachedAssetData;
 	}
@@ -27,9 +27,6 @@ public:
 
 	static int NumBasisVectors; 
 };
-
-template<typename T>
-uint32 GetClassHash(){return 0;};
 
 /* Common base for all narrative data table records */
 UCLASS(Blueprintable, BlueprintType)
@@ -83,11 +80,6 @@ public:
 };
 
 // cstamper todod - replace template specialization with macro'd static function overloads
-template<>
-inline uint32 GetClassHash<UNarrativeBasisVector>()
-{
-	return GetTypeHash(UNarrativeBasisVector::StaticClass());
-}
 
 /* N Dimensional vector */
 struct FVectorND : public TArray<float>

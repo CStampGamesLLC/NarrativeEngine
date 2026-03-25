@@ -13,12 +13,6 @@ class NARRATIVEENGINE_API UNarrativeEventDef : public UNarrativeDataAsset
 	NARRATIVE_DATA_HELPERS(UNarrativeEventDef)
 };
 
-template <>
-inline uint32 GetClassHash<UNarrativeEventDef>()
-{
-	return GetTypeHash(UNarrativeEventDef::StaticClass());
-}
-
 UCLASS()
 class NARRATIVEENGINE_API UNarrativeEntityDef : public UNarrativeDataAsset
 {
@@ -50,12 +44,6 @@ public:
 	NARRATIVE_DATA_HELPERS(UNarrativeEntityDef)
 };
 
-template <>
-inline uint32 GetClassHash<UNarrativeEntityDef>()
-{
-	return GetTypeHash(UNarrativeEntityDef::StaticClass());
-}
-
 UCLASS()
 class NARRATIVEENGINE_API UNarrativeActionDef : public UNarrativeDataAsset
 {
@@ -67,12 +55,6 @@ public:
 
 	NARRATIVE_DATA_HELPERS(UNarrativeActionDef)
 };
-
-template <>
-inline uint32 GetClassHash<UNarrativeActionDef>()
-{
-	return GetTypeHash(UNarrativeActionDef::StaticClass());
-}
 
 
 /*
@@ -114,8 +96,3 @@ public:
 	NARRATIVE_DATA_HELPERS(UNarrativeDialogDef)
 };
 
-template <>
-inline uint32 GetClassHash<UNarrativeDialogDef>()
-{
-	return GetTypeHash(UNarrativeDialogDef::StaticClass());
-}
