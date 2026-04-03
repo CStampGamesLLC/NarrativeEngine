@@ -61,6 +61,11 @@ void UNarrativeDataSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	InitializeNarrativeAssetData();
 }
 
+FPrimaryAssetId UNarrativeDataAsset::GetPrimaryAssetId() const
+{
+	return FPrimaryAssetId{"NarrativeData", GetFName()};
+}
+
 #pragma region Setup
 void UNarrativeSubsystem::RegisterEntity(const UNarrativeEntityDef& InEntityDef)
 {

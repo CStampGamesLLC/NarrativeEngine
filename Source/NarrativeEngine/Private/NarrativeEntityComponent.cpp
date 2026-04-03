@@ -62,6 +62,11 @@ FVectorND UNarrativeEntityComponent::GetLocation() const
 	{
 		return {};
 	}
+	
+	if  (!ensure(EntityDef.IsValid()))
+	{
+		return {};
+	}
 
 	FNarrativeEntityInstance* EntityInstance = NarrativeSubsystem->Scene.Entities.Find(*EntityDef);
 	if (!EntityInstance)
@@ -93,6 +98,11 @@ FNarrativeEntityInstance* UNarrativeEntityComponent::GetInstance()
 {
 	UNarrativeSubsystem* NarrativeSubsystem = GetWorld()->GetSubsystem<UNarrativeSubsystem>();
 	if (!IsValid(NarrativeSubsystem))
+	{
+		return nullptr;
+	}
+	
+	if (!ensure(EntityDef.IsValid()))
 	{
 		return nullptr;
 	}

@@ -30,22 +30,16 @@ public:
 
 /* Common base for all narrative data table records */
 UCLASS(Blueprintable, BlueprintType)
-class NARRATIVEENGINE_API UNarrativeDataAsset : public UDataAsset
+class NARRATIVEENGINE_API UNarrativeDataAsset : public UPrimaryDataAsset
 {
 	GENERATED_BODY()
 
 public:
-	FName Name;
-
-	UNarrativeDataAsset() : Super()
-	{
-		Name = FName{GetName()};
-	}
-
+	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 	friend uint32 GetTypeHash(const UNarrativeDataAsset& InRecord) 
 	{
 		// I don't need this lol
-		return GetTypeHash(InRecord.Name);
+		return GetTypeHash(InRecord.GetName());
 	}
 };
 
