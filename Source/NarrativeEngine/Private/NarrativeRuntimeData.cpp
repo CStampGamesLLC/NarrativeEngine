@@ -4,7 +4,7 @@
 FNarrativeEntityInstance::FNarrativeEntityInstance(const UNarrativeEntityDef& EntityDef)
 {
 	Asset = &EntityDef;
-	Name = EntityDef.Name;
+	Name = EntityDef.GetFName();
 	Mass = EntityDef.Mass;
 
 	TArray<TSoftObjectPtr<UNarrativeBasisVector>> BasisVectors = UNarrativeBasisVector::GetLoadedAssets();
