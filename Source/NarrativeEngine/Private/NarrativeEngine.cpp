@@ -2,6 +2,8 @@
 
 #include "NarrativeEngine.h"
 
+DEFINE_LOG_CATEGORY(LogDB_NarrativeEngine);
+
 #define LOCTEXT_NAMESPACE "FNarrativeEngineModule"
 
 void FNarrativeEngineModule::StartupModule()

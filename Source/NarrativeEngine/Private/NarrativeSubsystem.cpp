@@ -1,6 +1,8 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "NarrativeSubsystem.h"
+#include "NarrativeCoreData.h"
+#include "NarrativeEngine.h"
 
 static TAutoConsoleVariable<float> CVarNarrativeTelosStrength(
 	TEXT("db.Narrative.TelosStrength"),
@@ -28,6 +30,85 @@ void UNarrativeDataSubsystem::RegisterNarrativeAssets(FAssetRegistryModule& Asse
 	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEntityDef)
 	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEventDef)
 	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeDialogDef)
+
+	// Build the hot-path-safe basis-vector cache so every per-tick FVectorND op
+	// stops paying the asset-registry lookup + TryLoad cost.
+	RebuildBasisVectorCache();
+}
+
+void UNarrativeDataSubsystem::RebuildBasisVectorCache()
+{
+	CachedBasisVectors.Reset();
+	CachedBasisVectorIndices.Reset();
+
+	TArray<FAssetData> BasisVectorAssetData;
+	NarrativeAssetData.MultiFind(GetTypeHash(UNarrativeBasisVector::StaticClass()), BasisVectorAssetData);
+
+	CachedBasisVectors.Reserve(BasisVectorAssetData.Num());
+
+	for (const FAssetData& AssetData : BasisVectorAssetData)
+	{
+		UObject* Loaded = AssetData.GetSoftObjectPath().TryLoad();
+		UNarrativeBasisVector* BasisVector = Cast<UNarrativeBasisVector>(Loaded);
+		if (!IsValid(BasisVector))
+		{
+			continue;
+		}
+
+		// RegisterNarrativeAssets currently appends to NarrativeAssetData without
+		// clearing prior entries (tracked separately as a hygiene fix); guard the
+		// cache against duplicate FAssetData here so dimensions stay 1:1 with assets.
+		if (CachedBasisVectorIndices.Contains(BasisVector))
+		{
+			continue;
+		}
+
+		const int32 NewIndex = CachedBasisVectors.Add(BasisVector);
+		CachedBasisVectorIndices.Add(BasisVector, NewIndex);
+	}
+}
+
+int32 UNarrativeBasisVector::CachedNum()
+{
+	if (!GEngine)
+	{
+		return 0;
+	}
+
+	const UNarrativeDataSubsystem* DataSubsystem = GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>();
+	return IsValid(DataSubsystem) ? DataSubsystem->CachedBasisVectors.Num() : 0;
+}
+
+const TArray<TObjectPtr<UNarrativeBasisVector>>& UNarrativeBasisVector::GetCachedAssets()
+{
+	static const TArray<TObjectPtr<UNarrativeBasisVector>> EmptyFallback;
+	if (!GEngine)
+	{
+		return EmptyFallback;
+	}
+
+	const UNarrativeDataSubsystem* DataSubsystem = GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>();
+	return IsValid(DataSubsystem) ? DataSubsystem->CachedBasisVectors : EmptyFallback;
+}
+
+int32 UNarrativeBasisVector::GetCachedIndex(const UNarrativeBasisVector* InBasisVector)
+{
+	if (!GEngine || !InBasisVector)
+	{
+		return INDEX_NONE;
+	}
+
+	const UNarrativeDataSubsystem* DataSubsystem = GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>();
+	if (!IsValid(DataSubsystem))
+	{
+		return INDEX_NONE;
+	}
+
+	if (const int32* FoundIndex = DataSubsystem->CachedBasisVectorIndices.Find(InBasisVector))
+	{
+		return *FoundIndex;
+	}
+	return INDEX_NONE;
 }
 
 void UNarrativeDataSubsystem::OnAssetRegistryReady()
@@ -43,6 +124,10 @@ void UNarrativeDataSubsystem::InitializeNarrativeAssetData()
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 	if (AssetRegistry.IsLoadingAssets() || AssetRegistry.IsGathering())
 	{
+		UE_LOG(LogDB_NarrativeEngine, Log,
+			TEXT("InitializeNarrativeAssetData deferring registration; asset registry still scanning (LoadingAssets=%d, Gathering=%d)."),
+			AssetRegistry.IsLoadingAssets() ? 1 : 0, AssetRegistry.IsGathering() ? 1 : 0);
+
 		AssetRegistry.OnFilesLoaded().AddUObject(this, &UNarrativeDataSubsystem::OnAssetRegistryReady);
 		// Optionally kick search if needed:
 		if (!AssetRegistry.IsSearchAllAssets())
@@ -52,6 +137,8 @@ void UNarrativeDataSubsystem::InitializeNarrativeAssetData()
 		return;
 	}
 
+	UE_LOG(LogDB_NarrativeEngine, Verbose,
+		TEXT("InitializeNarrativeAssetData registering synchronously; asset registry already settled."));
 	RegisterNarrativeAssets(AssetRegistryModule);
 }
 
@@ -61,9 +148,26 @@ void UNarrativeDataSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	InitializeNarrativeAssetData();
 }
 
+void UNarrativeDataSubsystem::RegisterAsset(UNarrativeDataAsset* Asset)
+{
+	RegisteredAssets.Add(Asset);
+}
+
 FPrimaryAssetId UNarrativeDataAsset::GetPrimaryAssetId() const
 {
 	return FPrimaryAssetId{"NarrativeData", GetFName()};
+}
+
+void UNarrativeDataAsset::PostLoad()
+{
+	Super::PostLoad();
+	UNarrativeDataSubsystem* DataSubsystem = GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>();                                            \
+	if (!ensure(IsValid(DataSubsystem)))
+	{
+		return;
+	}                                                                                                    \
+		
+	DataSubsystem->RegisterAsset(this);
 }
 
 #pragma region Setup
@@ -71,10 +175,18 @@ void UNarrativeSubsystem::RegisterEntity(const UNarrativeEntityDef& InEntityDef)
 {
 	if (Scene.Entities.Contains(InEntityDef))
 	{
+		// Multiple actors sharing one EntityDef collapse to one particle (architecture review §2.2 A1).
+		// QA-relevant: typed NPCs co-existing in a level will all read/write the same simulation state.
+		UE_LOG(LogDB_NarrativeEngine, Verbose,
+			TEXT("RegisterEntity: '%s' already in scene; skipping (archetype-vs-instance collision)."),
+			*InEntityDef.GetName());
 		return;
 	}
 
 	Scene.Entities.Emplace(InEntityDef);
+	UE_LOG(LogDB_NarrativeEngine, Log,
+		TEXT("RegisterEntity: '%s' added to scene (SceneEntityCount=%d)."),
+		*InEntityDef.GetName(), Scene.Entities.Num());
 }
 
 TStatId UNarrativeSubsystem::GetStatId() const
@@ -91,23 +203,45 @@ void UNarrativeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
+	UE_LOG(LogDB_NarrativeEngine, Log,
+		TEXT("OnWorldBeginPlay: initializing narrative scene for world '%s'."),
+		*InWorld.GetName());
+
 	InitEntities();
 }
 
 void UNarrativeSubsystem::InitEntities()
 {
+	const int32 BasisCount = UNarrativeBasisVector::Num();
+	if (BasisCount == 0)
+	{
+		// Without basis vectors there's no state space; FVectorND will be size-0 and indexing asserts (review §2.2).
+		UE_LOG(LogDB_NarrativeEngine, Error,
+			TEXT("InitEntities: 0 basis vectors loaded. Sim cannot run — check asset registry and UNarrativeBasisVector content."));
+		return;
+	}
+
+	const int32 EntityCountBefore = Scene.Entities.Num();
 	ForeachDataAsset<UNarrativeEntityDef>([this](const UNarrativeEntityDef& EntityDef)
 	{
 		FSetElementId EntityId = Scene.Entities.Add(FNarrativeEntityInstance{EntityDef});
 		FNarrativeEntityInstance& Entity = Scene.Entities[EntityId];
-		
+
 		// Telos is where the entity tends to drift (this is the effective inertial force of the entity)
-		// The Telos of an Acorn is to move into its reality vector as a tree; it's stubborness. 
+		// The Telos of an Acorn is to move into its reality vector as a tree; it's stubborness.
 		// The state vectors this tends towards can affect behaviors, gameplay, aesthetics, etc.
 		Entity.Telos = Entity.Position;
-		// Zero out velocity (which is derived from old - new positions). 
+		// Zero out velocity (which is derived from old - new positions).
 		Entity.OldPosition = Entity.Position;
+
+		UE_LOG(LogDB_NarrativeEngine, Verbose,
+			TEXT("InitEntities: seeded '%s' Mass=%.3f."),
+			*EntityDef.GetName(), Entity.Mass);
 	});
+
+	UE_LOG(LogDB_NarrativeEngine, Log,
+		TEXT("InitEntities: scene seeded with %d entities (BasisVectors=%d, PreExisting=%d)."),
+		Scene.Entities.Num() - EntityCountBefore, BasisCount, EntityCountBefore);
 }
 
 // Acceleration = Force / Mass
@@ -115,6 +249,11 @@ void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity
 {
 	if (!ensure(Entity.Asset.IsValid()))
 	{
+		// Weak-ptr to EntityDef went stale (asset unload, hot-reload, etc.). This entity now contributes
+		// nothing to the sim. Surfaces the silent-drop case for a particular EntityDef.
+		UE_LOG(LogDB_NarrativeEngine, Warning,
+			TEXT("CalculateAcceleration: entity '%s' has invalid Asset weak-ptr; integration skipped."),
+			*Entity.Name.ToString());
 		return;
 	}
 
@@ -203,6 +342,17 @@ void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrati
 	UNarrativeSubsystem* NarrativeSubsystem = InWorld->GetSubsystem<UNarrativeSubsystem>();
 	if (!ensure(IsValid(InWorld)))
 	{
+		UE_LOG(LogDB_NarrativeEngine, Warning,
+			TEXT("ForeachEntity: null World; iteration skipped."));
+		return;
+	}
+
+	if (!IsValid(NarrativeSubsystem))
+	{
+		// The ensure on InWorld above masks this — without a subsystem we crash below; log first.
+		UE_LOG(LogDB_NarrativeEngine, Warning,
+			TEXT("ForeachEntity: NarrativeSubsystem unavailable on World '%s'; iteration skipped."),
+			*InWorld->GetName());
 		return;
 	}
 
@@ -222,6 +372,10 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 
 	if (!ensure(NewPosition.Num() == Entity.Position.Num()))
 	{
+		// Basis-vector count drifted between scene init and this tick — entity will not advance.
+		UE_LOG(LogDB_NarrativeEngine, Warning,
+			TEXT("VerletIntegrate: dimension mismatch for '%s' (NewPosition=%d, Position=%d); step skipped."),
+			*Entity.Name.ToString(), NewPosition.Num(), Entity.Position.Num());
 		return;
 	}
 
@@ -284,6 +438,10 @@ void UNarrativeSubsystem::BroadcastEntityDelta(FNarrativeEntityInstance& Entity,
 		Entity.LastBroadcastPosition = Entity.Position;
 		Entity.EntityDeltaBroadcastTimer = 0.f;
 		ChangeDelegate->Broadcast(Entity.Position);
+
+		UE_LOG(LogDB_NarrativeEngine, Verbose,
+			TEXT("BroadcastEntityDelta: '%s' broadcast (DistanceDelta=%.4f, TimerElapsed=%d)."),
+			*Entity.Name.ToString(), DistanceDelta, bTimerIntervalElapsed ? 1 : 0);
 	}
 }
 #pragma endregion

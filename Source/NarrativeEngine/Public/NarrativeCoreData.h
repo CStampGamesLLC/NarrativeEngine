@@ -4,16 +4,22 @@
 
 #include "NarrativeCoreData.generated.h"
 
+class UNarrativeDataAsset;
+class UNarrativeBasisVector;
+
 UCLASS()
 class UNarrativeDataSubsystem : public UEngineSubsystem
 {
 	GENERATED_BODY()
+	
+	friend class UNarrativeBasisVector;
 
 public:
 	void RegisterNarrativeAssets(FAssetRegistryModule& AssetRegistryModule);
 	void OnAssetRegistryReady();
 	void InitializeNarrativeAssetData();
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	void RegisterAsset(UNarrativeDataAsset* Asset);
 
 	template<typename T>
 	TArray<FAssetData> GetAssetData()
@@ -23,9 +29,40 @@ public:
 		NarrativeAssetData.MultiFind(ClassHash, CachedAssetData);
 		return CachedAssetData;
 	}
+	
+	/*
+	 * Hot-path-safe basis-vector cache.
+	 *
+	 * Built once RegisterNarrativeAssets has populated NarrativeAssetData, and
+	 * rebuilt any time it re-runs. The macro-generated UNarrativeBasisVector::Num()
+	 * and GetLoadedAssets() do a synchronous TryLoad sweep on every call, which
+	 * makes them unsafe inside any per-tick code path (FVectorND ctor, operator[],
+	 * VerletIntegrate, CalculateAcceleration). These caches give those paths an
+	 * O(1) Num() and an O(1) basis-vector -> dimension index lookup.
+	 *
+	 * Order matches the dimension layout of every FVectorND in the simulation:
+	 * stable for the lifetime of an asset-registry snapshot.
+	 */
+	UPROPERTY()
+	TArray<TObjectPtr<UNarrativeBasisVector>> CachedBasisVectors;
+	
+protected:
 	TMultiMap<uint32, FAssetData> NarrativeAssetData;
+	
+	UPROPERTY()
+	TSet<UNarrativeDataAsset*> RegisteredAssets;
 
-	static int NumBasisVectors; 
+	/*
+	 * Reverse index: basis-vector pointer -> dimension index. O(1).
+	 *
+	 * Raw pointer keys are intentional - GC-tracking is already handled by the
+	 * parallel CachedBasisVectors UPROPERTY array. Both are rebuilt together by
+	 * RebuildBasisVectorCache, so the keys never outlive their objects.
+	 */
+	TMap<const UNarrativeBasisVector*, int32> CachedBasisVectorIndices;
+
+	/* Snapshot CachedBasisVectors / CachedBasisVectorIndices from registered basis-vector assets. */
+	void RebuildBasisVectorCache();
 };
 
 /* Common base for all narrative data table records */
@@ -36,6 +73,7 @@ class NARRATIVEENGINE_API UNarrativeDataAsset : public UPrimaryDataAsset
 
 public:
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
+	virtual void PostLoad() override;
 	friend uint32 GetTypeHash(const UNarrativeDataAsset& InRecord) 
 	{
 		// I don't need this lol
@@ -70,6 +108,20 @@ public:
 	TArray<FText> Adjectives;
 #pragma endregion grammar
 
+	/*
+	 * Hot-path-safe cached accessors. Prefer these over Num() / GetLoadedAssets()
+	 * inside any per-tick code: they read from UNarrativeDataSubsystem's snapshot
+	 * (built when the asset registry settles) instead of doing a synchronous
+	 * TryLoad sweep every call.
+	 *
+	 * They return 0 / empty / INDEX_NONE when the cache hasn't been built yet -
+	 * callers must tolerate that case (the simulation simply has no dimensions
+	 * until the cache is alive).
+	 */
+	static int32 CachedNum();
+	static const TArray<TObjectPtr<UNarrativeBasisVector>>& GetCachedAssets();
+	static int32 GetCachedIndex(const UNarrativeBasisVector* InBasisVector);
+
 	NARRATIVE_DATA_HELPERS(UNarrativeBasisVector)
 };
 
@@ -83,7 +135,9 @@ struct FVectorND : public TArray<float>
 
 	FVectorND()
 	{
-		SetNumZeroed(UNarrativeBasisVector::Num());
+		// Hot-path: use cached basis-vector count instead of UNarrativeBasisVector::Num(),
+		// which would do an asset-registry scan + multi-map find on every default ctor.
+		SetNumZeroed(UNarrativeBasisVector::CachedNum());
 	}
 
 	explicit FVectorND(int32 InNum)
@@ -120,14 +174,16 @@ struct FVectorND : public TArray<float>
 
 	const float& operator[](const UNarrativeBasisVector& BasisVector) const
 	{
-		const int32 Index = UNarrativeBasisVector::GetLoadedAssets().IndexOfByKey(&BasisVector);
+		// Hot-path: O(1) cached lookup. The previous form did a TryLoad sweep and
+		// O(N) IndexOfByKey on every index, which made even FVectorND[X] expensive.
+		const int32 Index = UNarrativeBasisVector::GetCachedIndex(&BasisVector);
 		RangeCheck(Index);
 		return GetData()[Index];
 	}
 
 	float& operator[](const UNarrativeBasisVector& BasisVector)
 	{
-		const int32 Index = UNarrativeBasisVector::GetLoadedAssets().IndexOfByKey(&BasisVector);
+		const int32 Index = UNarrativeBasisVector::GetCachedIndex(&BasisVector);
 		RangeCheck(Index);
 		return GetData()[Index];
 	}
