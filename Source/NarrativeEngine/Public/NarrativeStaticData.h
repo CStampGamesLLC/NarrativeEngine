@@ -79,18 +79,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Location;
 
-	/* todo implment IEncounter interface for items that are selected via wave function collapse */
-	// todo make this an array of forces (need an embedded structure)
+	// Sigma determines the "gravitational reach" or width of a dialog topic in the Hilbert space.
+	// A higher sigma means characters can be further away along the axis
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Force;
-
-	/* Distribution of information (i.e. analog to energy) for an entity*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float ShannonEntropyRadius;
-
-	/* Curvature imposed on the state space */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float RadialFalloffExponent;
+	float SpaceSigma = 5.f;
 #pragma endregion 
 	
 	NARRATIVE_DATA_HELPERS(UNarrativeDialogDef)
