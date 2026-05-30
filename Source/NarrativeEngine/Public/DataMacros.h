@@ -62,4 +62,7 @@ operator int() const                                                            
 for (FAssetData FoundAsset : T##FoundAssets)									\
 {																				\
 	NarrativeAssetData.Add(GetTypeHash(T::StaticClass()), FoundAsset);			\
+	/* Eagerly load and pin: TSoftObjectPtr returned by TryLoad has no other   */\
+	/* owner, so we must root it here or GC will collect the asset.            */\
+	PinAsset(Cast<UNarrativeDataAsset>(FoundAsset.GetSoftObjectPath().TryLoad()));\
 }

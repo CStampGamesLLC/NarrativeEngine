@@ -4,6 +4,8 @@
 
 #include "NarrativeCoreData.generated.h"
 
+class UNarrativeDataAsset;
+
 UCLASS()
 class UNarrativeDataSubsystem : public UEngineSubsystem
 {
@@ -23,7 +25,15 @@ public:
 		NarrativeAssetData.MultiFind(ClassHash, CachedAssetData);
 		return CachedAssetData;
 	}
+
+	/** Load a narrative asset and pin it against GC. Safe to call multiple times for the same asset. */
+	void PinAsset(UNarrativeDataAsset* InAsset);
+
 	TMultiMap<uint32, FAssetData> NarrativeAssetData;
+
+	/** Strong-ref cache that prevents GC from collecting loaded narrative assets. */
+	UPROPERTY()
+	TArray<TObjectPtr<UNarrativeDataAsset>> LoadedNarrativeAssets;
 
 	static int NumBasisVectors; 
 };

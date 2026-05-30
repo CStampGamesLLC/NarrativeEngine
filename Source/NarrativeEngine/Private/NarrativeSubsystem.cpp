@@ -61,6 +61,14 @@ void UNarrativeDataSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	InitializeNarrativeAssetData();
 }
 
+void UNarrativeDataSubsystem::PinAsset(UNarrativeDataAsset* InAsset)
+{
+	if (IsValid(InAsset))
+	{
+		LoadedNarrativeAssets.AddUnique(InAsset);
+	}
+}
+
 FPrimaryAssetId UNarrativeDataAsset::GetPrimaryAssetId() const
 {
 	return FPrimaryAssetId{"NarrativeData", GetFName()};
