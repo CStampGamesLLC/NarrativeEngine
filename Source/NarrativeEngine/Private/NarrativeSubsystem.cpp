@@ -66,6 +66,7 @@ void UNarrativeDataSubsystem::PinAsset(UNarrativeDataAsset* InAsset)
 	if (IsValid(InAsset))
 	{
 		LoadedNarrativeAssets.AddUnique(InAsset);
+		NamedAssetCache.Emplace(InAsset->GetFName(), InAsset);
 	}
 }
 
@@ -202,8 +203,6 @@ void UNarrativeSubsystem::Tick(float DeltaTime)
 
 	// Apply gravitational forces between entities
 	SimulateEntities(DeltaTime);
-
-	WaveFunctionCollapse();
 }
 
 void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrativeEntityInstance&)> Callback)
@@ -249,25 +248,6 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 	}
 }
 
-void UNarrativeSubsystem::WaveFunctionCollapse()
-{
-	for (FNarrativeEntityInstance& Entity : Scene.Entities)
-	{
-		// if (!Entity.Asset.IsValid())
-		// {
-		// 	continue;
-		// }
-
-		// todo this isn't right... needs some work. This needs to select some action, which could be a dialog
-		//float CollapseProbability = exp(-Entity.Asset->ShannonEntropyRadius);
-		// if (FMath::RandRange(0.0f, 1.0f) < CollapseProbability)
-		// {
-		// 	// Instantiate entity in the gameplay layer
-		// 	OnEntitySpawned.Broadcast(Entity);
-		// }
-	}
-}
-
 void UNarrativeSubsystem::BroadcastEntityDelta(FNarrativeEntityInstance& Entity, const float DeltaTime)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::BroadcastEntityDelta)
@@ -296,22 +276,3 @@ void UNarrativeSubsystem::BroadcastEntityDelta(FNarrativeEntityInstance& Entity,
 }
 #pragma endregion
 
-#pragma region Tools
-template <typename T>
-const T* UNarrativeSubsystem::GetDataAsset(const FName& RecordName)
-{
-	T* OutRecord = nullptr;
-	ForeachRecord<T>([RecordName, &OutRecord](const T& Record)
-	{
-		if (!Record.Name != RecordName)
-		{
-			return;
-		}
-
-		OutRecord = &Record;
-	});
-
-	return OutRecord;
-}
-
-#pragma endregion

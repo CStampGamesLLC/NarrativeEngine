@@ -26,6 +26,23 @@ public:
 		return CachedAssetData;
 	}
 
+	/**
+	 * O(1) name lookup.  Returns the asset whose UObject FName matches InName,
+	 * cast to T, or nullptr if not found or wrong type.
+	 * The cache is populated in PinAsset so it is always in sync with
+	 * LoadedNarrativeAssets.
+	 */
+	template<typename T>
+	const T* GetAssetByName(FName InName) const
+	{
+		const TObjectPtr<UNarrativeDataAsset>* Found = NamedAssetCache.Find(InName);
+		if (!Found)
+		{
+			return nullptr;
+		}
+		return Cast<T>(*Found);
+	}
+
 	/** Load a narrative asset and pin it against GC. Safe to call multiple times for the same asset. */
 	void PinAsset(UNarrativeDataAsset* InAsset);
 
@@ -34,6 +51,10 @@ public:
 	/** Strong-ref cache that prevents GC from collecting loaded narrative assets. */
 	UPROPERTY()
 	TArray<TObjectPtr<UNarrativeDataAsset>> LoadedNarrativeAssets;
+
+	/** O(1) lookup from UObject FName → asset.  Kept in sync by PinAsset. */
+	UPROPERTY()
+	TMap<FName, TObjectPtr<UNarrativeDataAsset>> NamedAssetCache;
 
 	static int NumBasisVectors; 
 };

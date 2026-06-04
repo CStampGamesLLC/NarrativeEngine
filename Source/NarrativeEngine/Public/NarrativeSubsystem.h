@@ -48,6 +48,9 @@ class NARRATIVEENGINE_API UNarrativeSubsystem : public UTickableWorldSubsystem
 #pragma region EngineMethods
 public:
 	virtual void Tick(float DeltaTime) override;
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+	virtual TStatId GetStatId() const override;
 #pragma endregion
 	
 	// Actual public API
@@ -59,18 +62,27 @@ public:
 	
 public:
 	// Setup
-	virtual TStatId GetStatId() const override;
-	
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
-
 
 	FOnEntitySpawned OnEntitySpawned;
-	void WaveFunctionCollapse();
 	
 	// Runtime
+
+	/**
+	 * O(1) lookup of a UNarrativeDataAsset subclass by its UObject FName.
+	 * Delegates to UNarrativeDataSubsystem::NamedAssetCache which is populated
+	 * at asset-registration time via PinAsset.
+	 */
 	template <typename T>
-	const T* GetDataAsset(const FName& RecordName);
+	const T* GetDataAsset(const FName& RecordName) const
+	{
+		const UNarrativeDataSubsystem* DataSubsystem = GEngine ? GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>() : nullptr;
+		if (!IsValid(DataSubsystem))
+		{
+			return nullptr;
+		}
+		return DataSubsystem->GetAssetByName<T>(RecordName);
+	}
+
 	template <typename T>
 	static void ForeachDataAsset(const TFunction<void(const T&)> Callback = nullptr)
 	{
