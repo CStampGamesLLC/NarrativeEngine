@@ -1,6 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "NarrativeSubsystem.h"
+#include "GameFramework/WorldSettings.h"
 
 static TAutoConsoleVariable<float> CVarNarrativeTelosStrength(
 	TEXT("db.Narrative.TelosStrength"),
@@ -199,10 +200,28 @@ void UNarrativeSubsystem::Tick(float DeltaTime)
 	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::Tick)
 	
 	Super::Tick(DeltaTime);
-	Scene.Tick(DeltaTime);
+
+	// The narrative sim is the world's "broad phase": it runs in real time regardless of global time
+	// dilation, so a local soft-pause (focus) slows the player's view without slowing the simulated
+	// world. Un-dilate the delta so e.g. a 0.2 dilation still advances the sim at the true rate —
+	// this is the "time injected back into the narrative simulation" the local-focus concept needs.
+	float RealDeltaTime = DeltaTime;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const AWorldSettings* WorldSettings = World->GetWorldSettings())
+		{
+			const float Dilation = WorldSettings->GetEffectiveTimeDilation();
+			if (Dilation > KINDA_SMALL_NUMBER)
+			{
+				RealDeltaTime = DeltaTime / Dilation;
+			}
+		}
+	}
+
+	Scene.Tick(RealDeltaTime);
 
 	// Apply gravitational forces between entities
-	SimulateEntities(DeltaTime);
+	SimulateEntities(RealDeltaTime);
 }
 
 void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrativeEntityInstance&)> Callback)
