@@ -26,7 +26,8 @@ public class NarrativeEngine : ModuleRules
 			new string[]
 			{
 				"Core", 
-				"AssetRegistry"
+				"AssetRegistry", 
+				"Engine"
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);

@@ -1,6 +1,10 @@
 ﻿#pragma once
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DataMacros.h"
+#include "AssetRegistry/AssetData.h"
+#include "Engine/DataAsset.h"
+#include "Engine/Engine.h"
+#include "Subsystems/EngineSubsystem.h"
 
 #include "NarrativeCoreData.generated.h"
 
