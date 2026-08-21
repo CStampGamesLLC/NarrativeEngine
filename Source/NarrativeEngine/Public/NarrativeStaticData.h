@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "NarrativeCoreData.h"
 #include "NarrativeStaticData.generated.h"
 
@@ -84,6 +85,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float SpaceSigma = 5.f;
 #pragma endregion 
+
+	/* Scriptable gameplay mechanic entrypoint - fire a montage, and script mechanics through anim notifies */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FGameplayTagContainer AbilityTags;
+
 	
 	NARRATIVE_DATA_HELPERS(UNarrativeDialogDef)
 };
