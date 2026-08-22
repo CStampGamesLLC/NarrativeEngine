@@ -3,6 +3,7 @@
 
 #include "NarrativeEngineViewTool.h"
 
+#include "Editor.h"
 #include "NarrativeSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 
