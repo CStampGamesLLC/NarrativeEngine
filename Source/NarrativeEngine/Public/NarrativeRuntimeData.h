@@ -2,8 +2,6 @@
 #include "NarrativeStaticData.h"
 #include "NarrativeRuntimeData.generated.h"
 
-static const FString AssetPath = TEXT("/Game/ENarrativeBasisVectors.ENarrativeBasisVectors");
-
 USTRUCT()
 struct FNarrativeComponent
 {
