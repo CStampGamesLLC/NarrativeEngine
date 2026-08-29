@@ -29,6 +29,7 @@ void UNarrativeDataSubsystem::RegisterNarrativeAssets(FAssetRegistryModule& Asse
 	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEntityDef)
 	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEventDef)
 	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeDialogDef)
+	REGISTER_NARRATIVE_ASSET_TYPE(UArchetypeDef)
 }
 
 void UNarrativeDataSubsystem::OnAssetRegistryReady()

@@ -45,6 +45,25 @@ public:
 	NARRATIVE_DATA_HELPERS(UNarrativeEntityDef)
 };
 
+/* A named, illustrated point in the narrative Hilbert space - e.g. an archetype entities can be measured against or drift towards */
+UCLASS()
+class NARRATIVEENGINE_API UArchetypeDef : public UNarrativeDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Location;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FText DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSoftObjectPtr<UTexture2D> Icon;
+
+	NARRATIVE_DATA_HELPERS(UArchetypeDef)
+};
+
 UCLASS()
 class NARRATIVEENGINE_API UNarrativeActionDef : public UNarrativeDataAsset
 {
