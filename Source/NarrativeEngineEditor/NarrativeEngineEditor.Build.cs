@@ -23,6 +23,8 @@ public class NarrativeEngineEditor : ModuleRules
                 "Engine",
                 "Slate",
                 "SlateCore",
+                "PropertyEditor",
+                "AssetRegistry",
                 "NarrativeEngine"
             }
         );

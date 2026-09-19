@@ -129,7 +129,7 @@ void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity
 		return;
 	}
 
-	FVectorND ForceSum; // zeroed
+	FVectorND ForceSum(Entity.Position.GetBasis());
 
 	// External forces (again: these are "forces" unless you handle impulse semantics elsewhere)
 	for (const FVectorND& F : Entity.QueuedImpulseForces)
@@ -167,6 +167,12 @@ void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity
 	}
 
 	const float Mass = FMath::Max(Entity.Asset->Mass, 1.f);
+	// A force may introduce an axis absent from the original entity definition.
+	if (!Entity.Position.HasSameBasis(ForceSum))
+	{
+		Entity.Position = Entity.Position.Rebased(ForceSum.GetBasis());
+		Entity.OldPosition = Entity.OldPosition.Rebased(ForceSum.GetBasis());
+	}
 	Entity.Acceleration = ForceSum / Mass;
 }
 #pragma endregion
@@ -244,10 +250,7 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(UNarrativeSubsystem::VerletIntegrate)
 	
-	//cstamper todo - optimize FVectorND construction so that it's usable
-	FVectorND NewPosition;
-
-	if (!ensure(NewPosition.Num() == Entity.Position.Num()))
+	if (!ensure(Entity.Position.HasSameBasis(Entity.OldPosition) && Entity.Position.HasSameBasis(Entity.Acceleration)))
 	{
 		return;
 	}
@@ -257,11 +260,11 @@ void UNarrativeSubsystem::VerletIntegrate(FNarrativeEntityInstance& Entity, doub
 		// Verlet position update
 		const float Velocity = Entity.Position[i] - Entity.OldPosition[i];
 		const float Acceleration = Entity.Acceleration[i];
-		NewPosition[i] = Entity.Position[i] + Velocity + Acceleration * DeltaTime * DeltaTime;
+		const float NewPosition = Entity.Position[i] + Velocity + Acceleration * DeltaTime * DeltaTime;
 
 		// Update previous position for the next iteration
 		Entity.OldPosition[i] = Entity.Position[i];
-		Entity.Position[i] = NewPosition[i];
+		Entity.Position[i] = NewPosition;
 		
 		// Reset acceleration
 		Entity.Acceleration[i] = 0.f;

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
@@ -21,10 +21,10 @@ class NARRATIVEENGINE_API UNarrativeEntityDef : public UNarrativeDataAsset
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> StartingCoordinates;
+	FVectorND StartingCoordinates;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> PreviousCoordinates;
+	FVectorND PreviousCoordinates;
 
 	/* How resistent this entity is to external forces */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -53,7 +53,7 @@ class NARRATIVEENGINE_API UArchetypeDef : public UNarrativeDataAsset
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Location;
+	FVectorND Location;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FText DisplayName;
@@ -71,7 +71,7 @@ class NARRATIVEENGINE_API UNarrativeActionDef : public UNarrativeDataAsset
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Force;
+	FVectorND Force;
 
 	NARRATIVE_DATA_HELPERS(UNarrativeActionDef)
 };
@@ -97,7 +97,7 @@ public:
 
 #pragma region Narrative Engine Encounter
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSoftObjectPtr<UNarrativeBasisVector>, float> Location;
+	FVectorND Location;
 
 	// Sigma determines the "gravitational reach" or width of a dialog topic in the Hilbert space.
 	// A higher sigma means characters can be further away along the axis
@@ -112,4 +112,3 @@ public:
 	
 	NARRATIVE_DATA_HELPERS(UNarrativeDialogDef)
 };
-
