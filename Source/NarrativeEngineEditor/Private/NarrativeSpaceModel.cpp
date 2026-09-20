@@ -2,6 +2,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
+#include "AssetViewUtils.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "FileHelpers.h"
@@ -306,6 +307,108 @@ int32 FNarrativeSpaceModel::DeleteAssets(const TArray<UNarrativeDataAsset*>& Ass
 
 	Refresh();
 	return Deleted;
+}
+
+TArray<FString> FNarrativeSpaceModel::RenameNames(const FString& NewName, const int32 Count)
+{
+	TArray<FString> Result;
+	const FString Base = NewName.TrimStartAndEnd();
+	if (Base.IsEmpty() || Count <= 0) { return Result; }
+	if (Count == 1) { Result.Add(Base); return Result; }
+
+	const int32 Width = FString::FromInt(Count).Len();
+	for (int32 Number = 1; Number <= Count; ++Number)
+	{
+		FString Suffix = FString::FromInt(Number);
+		while (Suffix.Len() < Width) { Suffix.InsertAt(0, TEXT('0')); }
+		Result.Add(Base + TEXT("_") + Suffix);
+	}
+	return Result;
+}
+
+FString FNarrativeSpaceModel::RenameSeed(const TArray<UNarrativeDataAsset*>& Assets)
+{
+	TArray<FString> Names;
+	for (const UNarrativeDataAsset* Asset : Assets) { if (Asset) { Names.Add(Asset->GetName()); } }
+	if (Names.IsEmpty()) { return FString(); }
+	if (Names.Num() == 1) { return Names[0]; }
+
+	// The stem the batch already shares, so re-numbering one usually only needs Enter. Trailing
+	// digits and separators come off it, because RenameNames puts its own numbering back on.
+	FString Stem = Names[0];
+	for (const FString& Name : Names)
+	{
+		int32 Shared = 0;
+		while (Shared < Stem.Len() && Shared < Name.Len() && Stem[Shared] == Name[Shared]) { ++Shared; }
+		Stem.LeftInline(Shared);
+	}
+	while (!Stem.IsEmpty() && (FChar::IsDigit(Stem[Stem.Len() - 1]) || Stem[Stem.Len() - 1] == TEXT('_')))
+	{
+		Stem.LeftChopInline(1);
+	}
+	return Stem;
+}
+
+bool FNarrativeSpaceModel::CanRenameAssets(const TArray<UNarrativeDataAsset*>& Assets, const FString& NewName, FText& OutError) const
+{
+	OutError = FText::GetEmpty();
+	if (!CanEdit() || IsDragging() || GIsTransacting || GEditor->IsTransactionActive())
+	{
+		OutError = LOCTEXT("RenameBusy", "Renaming is not available right now.");
+		return false;
+	}
+	const TArray<FString> Names = RenameNames(NewName, Assets.Num());
+	if (Names.IsEmpty())
+	{
+		OutError = LOCTEXT("RenameEmpty", "Enter a name.");
+		return false;
+	}
+
+	for (int32 Index = 0; Index < Assets.Num(); ++Index)
+	{
+		const UNarrativeDataAsset* Asset = Assets[Index];
+		if (!Asset || !IsValid(Asset)) { continue; }
+		// A batch numbers past whatever is already in the folder, so only a lone rename reports a
+		// collision -- and renaming an asset to the name it already has is a no-op, not a clash.
+		const bool bUnique = Assets.Num() == 1 && Asset->GetName() != Names[Index];
+		const FString Folder = FPackageName::GetLongPackagePath(Asset->GetPackage()->GetName());
+		const FString ObjectPath = FString::Printf(TEXT("%s/%s.%s"), *Folder, *Names[Index], *Names[Index]);
+		if (!AssetViewUtils::IsValidObjectPathForCreate(ObjectPath, bUnique ? Asset->GetClass() : nullptr, OutError, !bUnique))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+int32 FNarrativeSpaceModel::RenameAssets(const TArray<UNarrativeDataAsset*>& Assets, const FString& NewName)
+{
+	FText Error;
+	if (!CanRenameAssets(Assets, NewName, Error)) { return 0; }
+	EndDrag(true);
+
+	const TArray<FString> Names = RenameNames(NewName, Assets.Num());
+	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
+
+	TArray<FAssetRenameData> Renames;
+	for (int32 Index = 0; Index < Assets.Num(); ++Index)
+	{
+		UNarrativeDataAsset* Asset = Assets[Index];
+		if (!Asset || !IsValid(Asset) || Asset->GetName() == Names[Index]) { continue; }
+		const FString Folder = FPackageName::GetLongPackagePath(Asset->GetPackage()->GetName());
+		FString PackageName;
+		FString AssetName;
+		AssetTools.CreateUniqueAssetName(Folder / Names[Index], TEXT(""), PackageName, AssetName);
+		// The folder is kept, so this only ever renames; localized variants follow the asset.
+		Renames.Emplace(Asset, Folder, AssetName, false, true);
+	}
+	if (Renames.IsEmpty()) { return 0; }
+
+	// AssetTools carries references, redirectors and source control across, and puts up its own
+	// dialog for anything it cannot rename. Like a Content Browser rename, this is not undoable.
+	const bool bRenamed = AssetTools.RenameAssetsWithDialog(Renames) == EAssetRenameResult::Success;
+	bRefreshPending = true;
+	return bRenamed ? Renames.Num() : 0;
 }
 
 void FNarrativeSpaceModel::Refresh()

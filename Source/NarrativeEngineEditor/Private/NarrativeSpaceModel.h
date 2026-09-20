@@ -82,6 +82,26 @@ public:
 	 * outside the undo buffer, exactly like deleting from the Content Browser. Returns the count.
 	 */
 	int32 DeleteAssets(const TArray<UNarrativeDataAsset*>& Assets, bool bShowConfirmation = true);
+
+	/**
+	 * Renames assets in place through the editor's own rename, so references, redirectors and
+	 * source control follow, and its dialog reports anything it cannot do. Outside the undo buffer,
+	 * exactly like renaming from the Content Browser. Each asset keeps its own folder. Returns the
+	 * number actually renamed; assets already carrying their target name are left alone.
+	 */
+	int32 RenameAssets(const TArray<UNarrativeDataAsset*>& Assets, const FString& NewName);
+
+	/** True when NewName can name this batch. OutError explains the first problem for the rename box. */
+	bool CanRenameAssets(const TArray<UNarrativeDataAsset*>& Assets, const FString& NewName, FText& OutError) const;
+
+	/**
+	 * Target names for one rename batch, in the order given. A lone asset takes NewName exactly;
+	 * several are numbered from it, zero padded to the batch's width so they sort as they are named.
+	 */
+	static TArray<FString> RenameNames(const FString& NewName, int32 Count);
+
+	/** Text the rename box opens with: the one asset's name, or the stem several already share. */
+	static FString RenameSeed(const TArray<UNarrativeDataAsset*>& Assets);
 	FStructProperty* ResolvePlacement(UNarrativeDataAsset* Asset);
 	FSimpleMulticastDelegate OnSelectionChanged;
 

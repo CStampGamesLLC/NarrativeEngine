@@ -4,6 +4,8 @@
 #include "Widgets/SLeafWidget.h"
 
 class FMenuBuilder;
+class IMenu;
+class SEditableTextBox;
 
 /** One paint/input surface, with no per-asset widget tree. */
 class SNarrativeSpaceViewport : public SLeafWidget
@@ -33,6 +35,9 @@ public:
 
 	/** Chooses how entries that leave one of the plotted axes undefined are drawn. */
 	void SetIncompleteDisplay(ENarrativeSpaceIncomplete Mode);
+
+	/** Opens the rename box over the selection. Does nothing without a selection this tool can edit. */
+	void BeginRename();
 
 	//~ Begin SWidget interface
 	virtual bool SupportsKeyboardFocus() const override { return true; }
@@ -82,6 +87,10 @@ private:
 	bool bFramePending = false;
 	ENarrativeSpaceIncomplete IncompleteDisplay = ENarrativeSpaceIncomplete::Dim;
 
+	// The rename box, while one is open, and the menu holding it.
+	TSharedPtr<SEditableTextBox> RenameBox;
+	TWeakPtr<IMenu> RenameMenu;
+
 	/** Card edge length in pixels at the current zoom; drives every level-of-detail threshold. */
 	double CardSize() const;
 
@@ -113,6 +122,21 @@ private:
 
 	/** Deletes the selected assets outright, through the editor's confirmation dialog. */
 	void DeleteSelection();
+
+	/** The selection as data assets, in plot order, which is also the order a rename numbers them in. */
+	TArray<UNarrativeDataAsset*> SelectedAssets() const;
+
+	/** Renames the selection to the committed text, then closes the box. Anything else just closes it. */
+	void CommitRename(const FText& Text, ETextCommit::Type Commit);
+
+	/** Keeps the rename box from committing a name the selection cannot take. */
+	bool VerifyRename(const FText& Text, FText& OutError) const;
+
+	/** Closes the rename box, if one is open. */
+	void EndRename();
+
+	/** Lets go of a rename box the menu stack closed on its own, so F2 can open the next one. */
+	void RenameDismissed(TSharedRef<IMenu> Menu);
 
 	/** Ends any drag, pan, orbit or marquee and clears the axis lock. */
 	void FinishInteraction(bool bCancel);

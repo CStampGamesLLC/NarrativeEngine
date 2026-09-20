@@ -2,11 +2,15 @@
 
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "Editor.h"
+#include "Framework/Application/IMenu.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
+#include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "NarrativeSpaceViewport"
@@ -96,6 +100,7 @@ void SNarrativeSpaceViewport::Construct(const FArguments& Args)
 
 SNarrativeSpaceViewport::~SNarrativeSpaceViewport()
 {
+	EndRename();
 	FinishInteraction(true);
 }
 
@@ -646,6 +651,15 @@ void SNarrativeSpaceViewport::ShowContextMenu(const FVector2D& At, const FVector
 	const int32 SelectionCount = Model->GetSelection().Num();
 	MenuBuilder.AddMenuEntry(
 		SelectionCount > 1
+			? FText::Format(LOCTEXT("RenameMany", "Rename {0} Assets"), FText::AsNumber(SelectionCount))
+			: LOCTEXT("RenameOne", "Rename Asset"),
+		LOCTEXT("RenameTip", "Rename the selected assets (F2), with the editor's usual reference fixup. This cannot be undone."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::BeginRename),
+			FCanExecuteAction::CreateLambda([this] { return Model->CanEdit() && !Model->GetSelection().IsEmpty(); })));
+	MenuBuilder.AddMenuEntry(
+		SelectionCount > 1
 			? FText::Format(LOCTEXT("DeleteMany", "Delete {0} Assets"), FText::AsNumber(SelectionCount))
 			: LOCTEXT("DeleteOne", "Delete Asset"),
 		LOCTEXT("DeleteTip", "Delete the selected assets outright, with the editor's usual confirmation and reference check. This cannot be undone."),
@@ -690,15 +704,107 @@ void SNarrativeSpaceViewport::CreateAssetAt(TWeakObjectPtr<UClass> Class, FVecto
 
 void SNarrativeSpaceViewport::DeleteSelection()
 {
+	const TArray<UNarrativeDataAsset*> Assets = SelectedAssets();
+	if (Assets.IsEmpty()) { return; }
+
+	FinishInteraction(true);
+	Model->DeleteAssets(Assets);
+}
+
+TArray<UNarrativeDataAsset*> SNarrativeSpaceViewport::SelectedAssets() const
+{
 	TArray<UNarrativeDataAsset*> Assets;
 	for (UObject* Object : Model->GetSelection())
 	{
 		if (UNarrativeDataAsset* Asset = Cast<UNarrativeDataAsset>(Object)) { Assets.Add(Asset); }
 	}
-	if (Assets.IsEmpty()) { return; }
+	return Assets;
+}
 
+void SNarrativeSpaceViewport::BeginRename()
+{
+	const TArray<UNarrativeDataAsset*> Assets = SelectedAssets();
+	if (RenameMenu.IsValid() || Assets.IsEmpty() || !Model->CanEdit()) { return; }
 	FinishInteraction(true);
-	Model->DeleteAssets(Assets);
+
+	// Anchor on the first selected card that is on screen, so the box opens where the eye already
+	// is. A selection that has been scrolled out of view falls back to the middle of the viewport.
+	const FGeometry Geometry = GetCachedGeometry();
+	const FVector2D Size = Geometry.GetLocalSize();
+	FVector2D Anchor = Size * 0.5;
+	for (const FVisibleItem& Item : VisibleItems(Size))
+	{
+		const bool bSelected = Item.Indices.ContainsByPredicate([this](const int32 Index)
+		{
+			return Model->IsSelected(Model->GetPoints()[Index].Asset.Get());
+		});
+		if (bSelected) { Anchor = Item.Screen - Item.HalfSize; break; }
+	}
+
+	const TSharedRef<SWidget> Popup = SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("Menu.Background"))
+		.Padding(6.f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(2)
+			[
+				SNew(STextBlock)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.Text(Assets.Num() > 1
+					? FText::Format(LOCTEXT("RenameBatch", "Rename {0} assets - numbered from this name, in plot order"),
+						FText::AsNumber(Assets.Num()))
+					: LOCTEXT("RenameSingle", "Rename asset"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(2)
+			[
+				SAssignNew(RenameBox, SEditableTextBox)
+				.MinDesiredWidth(240.f)
+				.Text(FText::FromString(FNarrativeSpaceModel::RenameSeed(Assets)))
+				.SelectAllTextWhenFocused(true)
+				.RevertTextOnEscape(true)
+				.ClearKeyboardFocusOnCommit(false)
+				.OnVerifyTextChanged(this, &SNarrativeSpaceViewport::VerifyRename)
+				.OnTextCommitted(this, &SNarrativeSpaceViewport::CommitRename)
+			]
+		];
+
+	const TSharedPtr<IMenu> Menu = FSlateApplication::Get().PushMenu(SharedThis(this), FWidgetPath(), Popup,
+		Geometry.LocalToAbsolute(Anchor), FPopupTransitionEffect(FPopupTransitionEffect::TypeInPopup));
+	if (!Menu.IsValid()) { RenameBox.Reset(); return; }
+
+	RenameMenu = Menu;
+	Menu->GetOnMenuDismissed().AddSP(this, &SNarrativeSpaceViewport::RenameDismissed);
+	FSlateApplication::Get().SetKeyboardFocus(RenameBox, EFocusCause::SetDirectly);
+}
+
+bool SNarrativeSpaceViewport::VerifyRename(const FText& Text, FText& OutError) const
+{
+	return Model->CanRenameAssets(SelectedAssets(), Text.ToString(), OutError);
+}
+
+void SNarrativeSpaceViewport::CommitRename(const FText& Text, const ETextCommit::Type Commit)
+{
+	// Escape and clicking away both close the box without touching the assets.
+	const FString NewName = Text.ToString();
+	EndRename();
+	if (Commit != ETextCommit::OnEnter) { return; }
+
+	Model->RenameAssets(SelectedAssets(), NewName);
+}
+
+void SNarrativeSpaceViewport::EndRename()
+{
+	// The box lives in the menu, so the menu is what actually has to go. Let go of it first: its
+	// dismissal runs straight back into this widget through the box losing focus.
+	const TSharedPtr<IMenu> Menu = RenameMenu.Pin();
+	RenameMenu.Reset();
+	RenameBox.Reset();
+	if (Menu.IsValid()) { Menu->Dismiss(); }
+}
+
+void SNarrativeSpaceViewport::RenameDismissed(TSharedRef<IMenu> Menu)
+{
+	if (RenameMenu.HasSameObject(&Menu.Get())) { RenameMenu.Reset(); RenameBox.Reset(); }
 }
 
 FReply SNarrativeSpaceViewport::OnMouseMove(const FGeometry& Geometry, const FPointerEvent& Event)
@@ -782,6 +888,7 @@ FReply SNarrativeSpaceViewport::OnKeyDown(const FGeometry& Geometry, const FKeyE
 	if (HasMouseCapture()) { return FReply::Handled(); }
 	if (Key == EKeys::Tab) { SelectNext(Event.IsShiftDown() ? -1 : 1); return FReply::Handled(); }
 	if (Key == EKeys::Delete) { DeleteSelection(); return FReply::Handled(); }
+	if (Key == EKeys::F2) { BeginRename(); return FReply::Handled(); }
 	if (Key == EKeys::F) { FrameAll(true); return FReply::Handled(); }
 	if (Key == EKeys::Home) { FrameAll(); return FReply::Handled(); }
 	if (Event.IsControlDown() && GEditor)

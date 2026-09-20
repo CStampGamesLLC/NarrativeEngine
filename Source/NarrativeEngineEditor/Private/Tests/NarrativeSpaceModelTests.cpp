@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetToolsModule.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
@@ -9,6 +10,7 @@
 #include "Misc/App.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "NarrativeStaticData.h"
 #include "SNarrativeSpaceEditor.h"
@@ -202,6 +204,66 @@ bool FNarrativeSpaceTransactionTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("No-op does not dirty clean package"), Fixture.Entity->GetPackage()->IsDirty());
 	GEditor->UndoTransaction(); Model.Tick();
 	TestEqual(TEXT("Canceled/no-op drag did not add undo entries"), Fixture.Entity->StartingCoordinates.GetCoordinate(Fixture.X), 2.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceRenameTest, "Narrative.Space.Rename",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceRenameTest::RunTest(const FString& Parameters)
+{
+	using FModel = FNarrativeSpaceModel;
+	TestEqual(TEXT("A lone asset takes the typed name exactly"),
+		FString::Join(FModel::RenameNames(TEXT("  Beat  "), 1), TEXT(",")), FString(TEXT("Beat")));
+	TestEqual(TEXT("A batch is numbered from the typed name"),
+		FString::Join(FModel::RenameNames(TEXT("Beat"), 3), TEXT(",")), FString(TEXT("Beat_1,Beat_2,Beat_3")));
+	const TArray<FString> Wide = FModel::RenameNames(TEXT("Beat"), 12);
+	TestEqual(TEXT("A wide batch is zero padded so it sorts as named"), Wide[0], FString(TEXT("Beat_01")));
+	TestEqual(TEXT("Padding covers the whole batch"), Wide.Last(), FString(TEXT("Beat_12")));
+	TestTrue(TEXT("A blank name names nothing"), FModel::RenameNames(TEXT("   "), 4).IsEmpty());
+	TestTrue(TEXT("An empty selection names nothing"), FModel::RenameNames(TEXT("Beat"), 0).IsEmpty());
+
+	NarrativeSpaceTests::FFixture Fixture;
+	auto* First = Fixture.Add<UArchetypeDef>(TEXT("Beat_01"));
+	auto* Second = Fixture.Add<UArchetypeDef>(TEXT("Beat_02"));
+	TestEqual(TEXT("One asset seeds the box with its own name"), FModel::RenameSeed({First}), FString(TEXT("Beat_01")));
+	TestEqual(TEXT("A batch seeds the box with the stem it shares"), FModel::RenameSeed({First, Second}), FString(TEXT("Beat")));
+	TestTrue(TEXT("Unrelated names share no stem"), FModel::RenameSeed({First, Fixture.Dialog}).IsEmpty());
+	TestTrue(TEXT("No assets seed nothing"), FModel::RenameSeed({}).IsEmpty());
+
+	FNarrativeSpaceModel Model;
+	Model.SetQuery(Fixture.Query());
+	FText Error;
+	TestFalse(TEXT("A blank name is rejected"), Model.CanRenameAssets({First}, TEXT(""), Error));
+	TestFalse(TEXT("Blank name explains itself"), Error.IsEmpty());
+	TestFalse(TEXT("Characters an object name cannot hold are rejected"), Model.CanRenameAssets({First}, TEXT("Beat/One"), Error));
+	TestFalse(TEXT("One asset cannot take a name its folder already uses"), Model.CanRenameAssets({First}, TEXT("Beat_02"), Error));
+	TestTrue(TEXT("An unchanged name is a no-op, not a collision"), Model.CanRenameAssets({First}, TEXT("Beat_01"), Error));
+	TestTrue(TEXT("A batch numbers past names already in the folder"), Model.CanRenameAssets({First, Second}, TEXT("Beat"), Error));
+
+	// A registry still discovering assets defers renaming to its own callback, so the rest is only
+	// checked when the rename can run here and now.
+	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
+	if (AssetTools.IsDiscoveringAssetsInProgress())
+	{
+		AddInfo(TEXT("Asset discovery in progress; the deferred rename itself is not checked here."));
+		return true;
+	}
+
+	TestEqual(TEXT("An unchanged name renames nothing"), Model.RenameAssets({First}, TEXT("Beat_01")), 0);
+	TestEqual(TEXT("Renaming one asset reports one rename"), Model.RenameAssets({First}, TEXT("Opening")), 1);
+	TestEqual(TEXT("The asset carries the typed name"), First->GetName(), FString(TEXT("Opening")));
+	TestEqual(TEXT("The asset keeps its folder"), FPackageName::GetLongPackagePath(First->GetPackage()->GetName()), Fixture.Root);
+	Model.Tick();
+	TestTrue(TEXT("A renamed asset is still plotted"), Model.GetPoints().ContainsByPredicate(
+		[First](const FNarrativeSpacePoint& Point) { return Point.Asset == First; }));
+
+	// Renaming writes the renamed package out, which is the only thing any of these tests puts on
+	// disk. Take the fixture's own folder back off it, so a test run leaves no content behind.
+	FString FolderOnDisk;
+	if (FPackageName::TryConvertLongPackageNameToFilename(Fixture.Root, FolderOnDisk))
+	{
+		IFileManager::Get().DeleteDirectory(*FolderOnDisk, false, true);
+	}
 	return true;
 }
 

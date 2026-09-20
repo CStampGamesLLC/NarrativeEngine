@@ -91,7 +91,7 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 		[
 			SNew(STextBlock)
 			.AutoWrapText(true)
-			.Text(LOCTEXT("Help", "Drag: move | Shift-click / marquee: select | Tab / Shift-Tab: step through entries | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB drag / MMB: pan | RMB click: menu | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | Delete: delete assets | Ctrl+Z/Y: undo/redo. Editing is disabled during PIE."))
+			.Text(LOCTEXT("Help", "Drag: move | Shift-click / marquee: select | Tab / Shift-Tab: step through entries | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB drag / MMB: pan | RMB click: menu | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | F2: rename assets | Delete: delete assets | Ctrl+Z/Y: undo/redo. Editing is disabled during PIE."))
 		]
 	];
 }

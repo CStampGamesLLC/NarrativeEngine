@@ -39,6 +39,7 @@ field that was edited, even after choosing another field.
 | Frame selection / all | F / Home, or toolbar buttons |
 | 3D orientation | XY, XZ, YZ, Iso; Alt+right mouse drag orbits |
 | Open asset editor | Double-click |
+| Rename selected assets | F2, or right-click > Rename; Esc closes the box |
 | Undo / redo | Ctrl+Z / Ctrl+Y while viewport has focus |
 | Save | Save matching assets, or Ctrl+S in viewport |
 | Place Content Browser assets | Drop assets matching the current query onto the viewport |
@@ -68,6 +69,12 @@ Completed edits send `PostEditChangeProperty` for the resolved vector field.
 External Details edits, undo/redo, registry add/remove/rename, initial registry
 scan completion, and object replacement refresh the model. The model pins loaded
 assets and icon textures against GC. Editing and saving are disabled during PIE.
+
+F2 renames the selected assets in place, through the same rename the Content
+Browser uses: each asset keeps its folder, references and redirectors follow, and
+Unreal reports whatever it cannot rename. One asset takes the typed name; several
+are numbered from it in plot order. Like a Content Browser rename, this is not
+undoable, and it writes the renamed package out even if it had never been saved.
 
 Saving is explicit: **Save matching assets** offers Unreal's checkout-and-save
 dialog for dirty packages currently represented by the query, including changes
@@ -117,8 +124,9 @@ Automation RunTests Narrative.Space
 
 Tests cover projection and zoom invariants, orbit, locks, reordered/sparse bases,
 hidden coordinate preservation, query validation, registry/property refresh,
-multi-asset undo/redo, cancellation, no-op dirty-state preservation, and native
-widget construction. `Narrative.Space.Render` requires a rendering RHI and writes
+multi-asset undo/redo, cancellation, no-op dirty-state preservation, rename
+naming/validation and an in-place rename, and native widget construction.
+`Narrative.Space.Render` requires a rendering RHI and writes
 `Saved/Automation/NarrativeSpace/Editor.png`; it reports a skip under NullRHI.
 Fixtures are temporary in-memory assets; these tests do not save project assets.
 
