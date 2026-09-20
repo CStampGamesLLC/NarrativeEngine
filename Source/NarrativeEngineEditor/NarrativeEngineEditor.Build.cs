@@ -12,6 +12,9 @@ public class NarrativeEngineEditor : ModuleRules
                 "Core",
                 "Blutility", 
                 "UMG",
+                "CoreUObject",
+                "Engine",
+                "NarrativeEngine",
             }
         );
 
@@ -19,13 +22,13 @@ public class NarrativeEngineEditor : ModuleRules
             new string[]
             {
                 "UnrealEd",
-                "CoreUObject",
-                "Engine",
                 "Slate",
                 "SlateCore",
                 "PropertyEditor",
-                "AssetRegistry",
-                "NarrativeEngine"
+                "InputCore",
+                "ToolMenus",
+                "WorkspaceMenuStructure",
+                "AssetRegistry"
             }
         );
 

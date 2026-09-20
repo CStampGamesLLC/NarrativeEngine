@@ -1,0 +1,84 @@
+﻿#pragma once
+
+#include "NarrativeSpaceModel.h"
+#include "Widgets/SLeafWidget.h"
+
+/** One paint/input surface, with no per-asset widget tree. */
+class SNarrativeSpaceViewport : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SNarrativeSpaceViewport) {}
+		SLATE_ARGUMENT(TSharedPtr<FNarrativeSpaceModel>, Model)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& Args);
+	virtual ~SNarrativeSpaceViewport() override;
+
+	/** Fits the camera around every plotted asset, or around the selection only. */
+	void FrameAll(bool bSelectionOnly = false);
+
+	/** Switches the view direction. Queries with fewer than three axes stay on XY. */
+	void SetView(ENarrativeSpaceView View);
+
+	/** Restores the default camera and reframes once the widget has been given a size. */
+	void ResetCamera();
+
+	//~ Begin SWidget interface
+	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override { return FVector2D(800, 600); }
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect& CullingRect,
+		FSlateWindowElementList& OutElements, int32 LayerId, const FWidgetStyle& Style,
+		bool bParentEnabled) const override;
+	virtual void Tick(const FGeometry& Geometry, double CurrentTime, float DeltaTime) override;
+	virtual FReply OnMouseButtonDown(const FGeometry& Geometry, const FPointerEvent& Event) override;
+	virtual FReply OnMouseButtonUp(const FGeometry& Geometry, const FPointerEvent& Event) override;
+	virtual FReply OnMouseMove(const FGeometry& Geometry, const FPointerEvent& Event) override;
+	virtual FReply OnMouseWheel(const FGeometry& Geometry, const FPointerEvent& Event) override;
+	virtual FReply OnMouseButtonDoubleClick(const FGeometry& Geometry, const FPointerEvent& Event) override;
+	virtual FReply OnKeyDown(const FGeometry& Geometry, const FKeyEvent& Event) override;
+	virtual FReply OnKeyUp(const FGeometry& Geometry, const FKeyEvent& Event) override;
+	virtual void OnMouseCaptureLost(const FCaptureLostEvent& Event) override;
+	virtual FReply OnDragOver(const FGeometry& Geometry, const FDragDropEvent& Event) override;
+	virtual FReply OnDrop(const FGeometry& Geometry, const FDragDropEvent& Event) override;
+	//~ End SWidget interface
+
+private:
+	/** One drawn card. Several points collapse into a single item once cards are too small to read. */
+	struct FVisibleItem
+	{
+		FVector2D Screen;
+		FVector2D HalfSize;
+		TArray<int32> Indices;
+		double Depth = 0.0;
+	};
+
+	TSharedPtr<FNarrativeSpaceModel> Model;
+	FNarrativeSpaceCamera Camera;
+	FVector2D ViewportSize = FVector2D::ZeroVector;
+
+	// Interaction state, all in local widget space.
+	FVector2D MouseDown = FVector2D::ZeroVector;
+	FVector2D LastMouse = FVector2D::ZeroVector;
+	FVector2D MarqueeEnd = FVector2D::ZeroVector;
+	bool bPan = false;
+	bool bOrbit = false;
+	bool bPendingDrag = false;
+	bool bMarquee = false;
+	bool bAddSelection = false;
+	int32 AxisLock = INDEX_NONE;
+	bool bFramePending = false;
+
+	/** Card edge length in pixels at the current zoom; drives every level-of-detail threshold. */
+	double CardSize() const;
+
+	/** Projects and culls the model's points, back to front, clustering them when cards get small. */
+	TArray<FVisibleItem> VisibleItems(const FVector2D& Size) const;
+
+	/** Point indices under a local-space position, topmost first. Empty when nothing is hit. */
+	TArray<int32> Hit(const FVector2D& At, const FVector2D& Size) const;
+
+	void ApplyDrag(const FVector2D& At, bool bSnap);
+
+	/** Ends any drag, pan, orbit or marquee and clears the axis lock. */
+	void FinishInteraction(bool bCancel);
+};

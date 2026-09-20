@@ -26,6 +26,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FVectorND PreviousCoordinates;
 
+#if WITH_EDITOR
+	virtual FName GetSpacePlacementProperty() const override { return GET_MEMBER_NAME_CHECKED(UNarrativeEntityDef, StartingCoordinates); }
+#endif
+
 	/* How resistent this entity is to external forces */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	double Mass = 1.f;
@@ -60,6 +64,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSoftObjectPtr<UTexture2D> Icon;
+
+#if WITH_EDITOR
+	virtual FText GetSpaceLabel() const override { return DisplayName.IsEmpty() ? Super::GetSpaceLabel() : DisplayName; }
+	virtual TSoftObjectPtr<UTexture2D> GetSpaceIcon() const override { return Icon; }
+#endif
 
 	NARRATIVE_DATA_HELPERS(UArchetypeDef)
 };
@@ -103,6 +112,10 @@ public:
 	// A higher sigma means characters can be further away along the axis
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float SpaceSigma = 5.f;
+#if WITH_EDITOR
+	virtual FText GetSpaceLabel() const override { return Label.IsEmpty() ? Super::GetSpaceLabel() : Label; }
+	virtual float GetSpaceRadius() const override { return SpaceSigma; }
+#endif
 #pragma endregion 
 
 	/* Scriptable gameplay mechanic entrypoint - fire a montage, and script mechanics through anim notifies */

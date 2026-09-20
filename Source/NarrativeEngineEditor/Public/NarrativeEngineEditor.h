@@ -6,9 +6,10 @@
 class FNarrativeEngineEditorModule : public IModuleInterface
 {
 public:
-    virtual void StartupModule() override;
-    virtual void ShutdownModule() override;
+	virtual void StartupModule() override;
+	virtual void ShutdownModule() override;
 private:
-    class IConsoleObject* PreviewMigrationCommand = nullptr;
-    class IConsoleObject* MigrateCommand = nullptr;
+	FDelegateHandle MenuStartupHandle;
+	class IConsoleObject* PreviewMigrationCommand = nullptr;
+	class IConsoleObject* MigrateCommand = nullptr;
 };

@@ -72,6 +72,13 @@ class NARRATIVEENGINE_API UNarrativeDataAsset : public UPrimaryDataAsset
 
 public:
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
+#if WITH_EDITOR
+	/** Editor placement contract. Override when more than one FVectorND has meaning. */
+	virtual FName GetSpacePlacementProperty() const;
+	virtual FText GetSpaceLabel() const;
+	virtual TSoftObjectPtr<UTexture2D> GetSpaceIcon() const { return nullptr; }
+	virtual float GetSpaceRadius() const { return 0.f; }
+#endif
 	friend uint32 GetTypeHash(const UNarrativeDataAsset& InRecord) 
 	{
 		// I don't need this lol

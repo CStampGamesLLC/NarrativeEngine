@@ -1,0 +1,38 @@
+﻿#pragma once
+
+#include "CoreMinimal.h"
+#include "NarrativeCoreData.h"
+#include "NarrativeSpaceQuery.generated.h"
+
+/** Editor-only authoring filter; axis order is X, Y, Z. */
+USTRUCT(BlueprintType)
+struct NARRATIVEENGINEEDITOR_API FNarrativeSpaceQuery
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Space")
+	TArray<TSoftObjectPtr<UNarrativeBasisVector>> Axes;
+
+	/** Empty means all narrative data asset classes. Derived classes are included. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Space")
+	TArray<TSubclassOf<UNarrativeDataAsset>> Classes;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Space")
+	FString ContentPath = TEXT("/Game");
+
+	/** None uses each class's default. An explicit field never falls back to another field. */
+	UPROPERTY(BlueprintReadWrite, Category = "Narrative Space")
+	FName PlacementField = NAME_None;
+
+	bool Validate(FText& OutError) const;
+};
+
+/** Transient details-panel adapter, never saved into game content. */
+UCLASS(Transient)
+class NARRATIVEENGINEEDITOR_API UNarrativeSpaceSettings : public UObject
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(EditAnywhere, Category = "Narrative Space", meta = (ShowOnlyInnerProperties))
+	FNarrativeSpaceQuery Query;
+};
