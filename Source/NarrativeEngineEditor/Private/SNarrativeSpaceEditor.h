@@ -34,6 +34,8 @@ private:
 	TSharedPtr<IDetailsView> AssetDetails;
 	TSharedPtr<SComboBox<TSharedPtr<FName>>> FieldPicker;
 	TArray<TSharedPtr<FName>> FieldOptions;
+	/** What AssetDetails is currently bound to, so an unchanged selection never rebuilds it. */
+	TArray<TWeakObjectPtr<UObject>> DisplayedSelection;
 
 	void CreateDetailViews();
 	void CreateFieldPicker();

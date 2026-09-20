@@ -172,6 +172,7 @@ void FNarrativeSpaceModel::Refresh()
 {
 	if (IsDragging()) { bRefreshPending = true; return; }
 	bRefreshPending = false;
+	bReadPending = false;
 	LoadedAssets.Reset();
 	LoadedIcons.Reset();
 	Points.Reset();
@@ -254,6 +255,7 @@ void FNarrativeSpaceModel::Tick()
 {
 	if (IsDragging() && !CanEdit()) { EndDrag(true); }
 	if (bRefreshPending && !IsDragging()) { Refresh(); }
+	else if (bReadPending && !IsDragging()) { bReadPending = false; ReadPoints(); }
 }
 
 bool FNarrativeSpaceModel::CanEdit() const { return bQueryValid && GEditor && !GEditor->IsPlaySessionInProgress(); }
@@ -370,7 +372,13 @@ void FNarrativeSpaceModel::OpenSelection()
 void FNarrativeSpaceModel::PostUndo(bool bSuccess) { if (bSuccess) { bRefreshPending = true; } }
 void FNarrativeSpaceModel::PropertyChanged(UObject* Object, FPropertyChangedEvent& Event)
 {
-	if (!bOwnChange && Object && Object->IsA<UNarrativeDataAsset>()) { bRefreshPending = true; }
+	if (bOwnChange || !Object || !Object->IsA<UNarrativeDataAsset>()) { return; }
+	// Dragging a coordinate spinbox broadcasts an interactive change on every mouse move, and a
+	// full refresh rebuilds the details tree out from under the cursor, ending the drag. Re-read
+	// the plotted positions instead so the viewport tracks the drag live; the ValueSet that closes
+	// the interaction still refreshes.
+	if ((Event.ChangeType & EPropertyChangeType::Interactive) != 0) { bReadPending = true; }
+	else { bRefreshPending = true; }
 }
 void FNarrativeSpaceModel::AssetChanged(const FAssetData& Asset) { bRefreshPending = true; }
 void FNarrativeSpaceModel::AssetRenamed(const FAssetData& Asset, const FString& OldPath) { bRefreshPending = true; }

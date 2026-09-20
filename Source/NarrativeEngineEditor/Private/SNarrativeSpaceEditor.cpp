@@ -203,7 +203,19 @@ void SNarrativeSpaceEditor::QueryChanged(const FPropertyChangedEvent& Event)
 
 void SNarrativeSpaceEditor::SelectionChanged()
 {
-	AssetDetails->SetObjects(Model->GetSelection(), true);
+	// Refresh broadcasts whether or not the selection actually moved, and SetObjects rebuilds the
+	// whole tree, destroying any widget the user is mid-interaction with. Only rebind on a change.
+	const TArray<UObject*> Selection = Model->GetSelection();
+	bool bChanged = Selection.Num() != DisplayedSelection.Num();
+	for (int32 Index = 0; !bChanged && Index < Selection.Num(); ++Index)
+	{
+		bChanged = DisplayedSelection[Index].Get() != Selection[Index];
+	}
+	if (!bChanged) { return; }
+
+	DisplayedSelection.Reset(Selection.Num());
+	for (UObject* Object : Selection) { DisplayedSelection.Emplace(Object); }
+	AssetDetails->SetObjects(Selection, true);
 }
 
 void SNarrativeSpaceEditor::RefreshFieldOptions()

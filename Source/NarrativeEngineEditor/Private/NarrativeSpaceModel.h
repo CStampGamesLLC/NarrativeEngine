@@ -99,6 +99,8 @@ private:
 	FText Status;
 	bool bQueryValid = false;
 	bool bRefreshPending = false;
+	/** An in-flight interactive edit: re-read positions, but leave the details panel alone. */
+	bool bReadPending = false;
 	bool bOwnChange = false;
 
 	void ReadPoints();
