@@ -4,6 +4,18 @@
 #include "NarrativeCoreData.h"
 #include "NarrativeSpaceQuery.generated.h"
 
+/** What the viewport does with assets that leave one of the plotted axes undefined. */
+UENUM()
+enum class ENarrativeSpaceIncomplete : uint8
+{
+	/** Drawn like any other entry; the hollow axis markers still flag the missing axis. */
+	Show,
+	/** Drawn faded, but still selectable and draggable so the missing axis can be authored. */
+	Dim,
+	/** Left out of the viewport, and out of framing and hit testing with it. */
+	Hide
+};
+
 /** Editor-only authoring filter; axis order is X, Y, Z. */
 USTRUCT(BlueprintType)
 struct NARRATIVEENGINEEDITOR_API FNarrativeSpaceQuery
@@ -35,4 +47,8 @@ class NARRATIVEENGINEEDITOR_API UNarrativeSpaceSettings : public UObject
 public:
 	UPROPERTY(EditAnywhere, Category = "Narrative Space", meta = (ShowOnlyInnerProperties))
 	FNarrativeSpaceQuery Query;
+
+	/** Display only: does not change which assets the query matches, or any asset value. */
+	UPROPERTY(EditAnywhere, Category = "Narrative Space", meta = (DisplayName = "Missing An Axis"))
+	ENarrativeSpaceIncomplete Incomplete = ENarrativeSpaceIncomplete::Dim;
 };

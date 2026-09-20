@@ -30,6 +30,44 @@ namespace NarrativeSpaceDraw
 	const FLinearColor HudTextColor(0.6f, 0.7f, 0.8f);
 	const FLinearColor AxisColors[] = {FLinearColor(1.f, 0.3f, 0.25f), FLinearColor(0.3f, 0.85f, 0.4f), FLinearColor(0.3f, 0.6f, 1.f)};
 
+	/** Opacity applied to an entry that leaves one of the plotted axes undefined, when dimmed. */
+	constexpr float DimOpacity = 0.25f;
+
+	/** Gap held between an axis label and both its own axis line and the viewport edge. */
+	constexpr double AxisLabelMargin = 12.0;
+
+	/** Rough glyph advance in SmallFont, used only to keep a label inside the viewport. */
+	constexpr double GlyphWidth = 7.0;
+
+	/**
+	 * Clips the infinite line Origin + t * Direction against the rect (0,0)..Size, returning the
+	 * parameter range that lies inside it. False when the line misses the viewport entirely.
+	 */
+	bool ClipLineToRect(const FVector2D& Origin, const FVector2D& Direction, const FVector2D& Size,
+		double& OutEnter, double& OutExit)
+	{
+		double Enter = -TNumericLimits<double>::Max();
+		double Exit = TNumericLimits<double>::Max();
+		for (int32 Component = 0; Component < 2; ++Component)
+		{
+			if (FMath::IsNearlyZero(Direction[Component]))
+			{
+				// Parallel to this pair of edges: either wholly inside them or wholly outside.
+				if (Origin[Component] < 0.0 || Origin[Component] > Size[Component]) { return false; }
+				continue;
+			}
+			double Near = (0.0 - Origin[Component]) / Direction[Component];
+			double Far = (Size[Component] - Origin[Component]) / Direction[Component];
+			if (Near > Far) { Swap(Near, Far); }
+			Enter = FMath::Max(Enter, Near);
+			Exit = FMath::Min(Exit, Far);
+		}
+		if (Enter > Exit) { return false; }
+		OutEnter = Enter;
+		OutExit = Exit;
+		return true;
+	}
+
 	/** Display letter for a query axis index. */
 	const TCHAR* AxisLabel(const int32 Axis)
 	{
@@ -72,6 +110,7 @@ void SNarrativeSpaceViewport::FrameAll(const bool bSelectionOnly)
 	TArray<FVector> Positions;
 	for (const FNarrativeSpacePoint& Point : Model->GetPoints())
 	{
+		if (IsHidden(Point)) { continue; }
 		if (!bSelectionOnly || Model->IsSelected(Point.Asset.Get())) { Positions.Add(Point.Position); }
 	}
 	Camera.Frame(Positions, ViewportSize);
@@ -90,6 +129,81 @@ double SNarrativeSpaceViewport::CardSize() const
 	return FMath::Clamp(64.0 * FMath::Sqrt(Camera.Zoom / 24.0), 5.0, 200.0);
 }
 
+double SNarrativeSpaceViewport::ColumnWidth() const
+{
+	const double Extent = CardSize();
+	return FMath::Max(Extent < NarrativeSpaceDraw::DetailCardSize ? Extent : Extent * 2.0, 1.0);
+}
+
+bool SNarrativeSpaceViewport::IsIncomplete(const FNarrativeSpacePoint& Point) const
+{
+	const int32 AxisCount = Model->GetQuery().Axes.Num();
+	return Point.PresentAxes != uint8((1 << AxisCount) - 1);
+}
+
+bool SNarrativeSpaceViewport::IsHidden(const FNarrativeSpacePoint& Point) const
+{
+	return IncompleteDisplay == ENarrativeSpaceIncomplete::Hide && IsIncomplete(Point);
+}
+
+void SNarrativeSpaceViewport::SetIncompleteDisplay(const ENarrativeSpaceIncomplete Mode)
+{
+	if (IncompleteDisplay == Mode) { return; }
+	// Hiding can drop the entry under an in-flight gesture, so settle first.
+	FinishInteraction(true);
+	IncompleteDisplay = Mode;
+}
+
+void SNarrativeSpaceViewport::SelectNext(const int32 Step)
+{
+	if (ViewportSize.X <= 0 || ViewportSize.Y <= 0 || Step == 0) { return; }
+
+	const TArray<FNarrativeSpacePoint>& Points = Model->GetPoints();
+	TArray<int32> Order;
+	TArray<FVector2D> Screens;
+	for (int32 Index = 0; Index < Points.Num(); ++Index)
+	{
+		if (!Points[Index].Asset.IsValid() || IsHidden(Points[Index])) { continue; }
+		Order.Add(Index);
+		Screens.Add(Camera.Project(Points[Index].Position, ViewportSize));
+	}
+	if (Order.IsEmpty()) { return; }
+
+	// Column-major reading order: all the way down one column, then the next column to the right.
+	// Entries are bucketed by card width because exact screen X values almost never coincide.
+	const double Column = ColumnWidth();
+	TArray<int32> Slots;
+	for (int32 Slot = 0; Slot < Order.Num(); ++Slot) { Slots.Add(Slot); }
+	Slots.Sort([&](const int32 A, const int32 B)
+	{
+		const int32 ColumnA = FMath::FloorToInt(Screens[A].X / Column);
+		const int32 ColumnB = FMath::FloorToInt(Screens[B].X / Column);
+		if (ColumnA != ColumnB) { return ColumnA < ColumnB; }
+		if (Screens[A].Y != Screens[B].Y) { return Screens[A].Y < Screens[B].Y; }
+		return Screens[A].X < Screens[B].X;
+	});
+
+	// Walk on from the last selected entry in that order, so repeated presses advance.
+	int32 Current = INDEX_NONE;
+	for (int32 Position = 0; Position < Slots.Num(); ++Position)
+	{
+		if (Model->IsSelected(Points[Order[Slots[Position]]].Asset.Get())) { Current = Position; }
+	}
+	const int32 Next = Current == INDEX_NONE
+		? (Step > 0 ? 0 : Slots.Num() - 1)
+		: ((Current + Step) % Slots.Num() + Slots.Num()) % Slots.Num();
+
+	const int32 Chosen = Slots[Next];
+	Model->Select({Points[Order[Chosen]].Asset.Get()});
+
+	// Bring an off-screen entry into view without disturbing the zoom the user set.
+	const FVector2D Screen = Screens[Chosen];
+	if (Screen.X < 0 || Screen.Y < 0 || Screen.X > ViewportSize.X || Screen.Y > ViewportSize.Y)
+	{
+		Camera.Center = Points[Order[Chosen]].Position;
+	}
+}
+
 TArray<SNarrativeSpaceViewport::FVisibleItem> SNarrativeSpaceViewport::VisibleItems(const FVector2D& Size) const
 {
 	using namespace NarrativeSpaceDraw;
@@ -106,7 +220,8 @@ TArray<SNarrativeSpaceViewport::FVisibleItem> SNarrativeSpaceViewport::VisibleIt
 	for (int32 Index = 0; Index < Points.Num(); ++Index)
 	{
 		const FNarrativeSpacePoint& Point = Points[Index];
-		if (!Point.Asset.IsValid()) { continue; }
+		if (!Point.Asset.IsValid() || IsHidden(Point)) { continue; }
+		const bool bIncomplete = IsIncomplete(Point);
 
 		FVector2D Screen = Camera.Project(Point.Position, Size);
 		const FVector2D Half = Extent < DetailCardSize
@@ -144,6 +259,8 @@ TArray<SNarrativeSpaceViewport::FVisibleItem> SNarrativeSpaceViewport::VisibleIt
 				Cluster.Screen = (Cluster.Screen * Cluster.Indices.Num() + Screen) / (Cluster.Indices.Num() + 1);
 				Cluster.Indices.Add(Index);
 				Cluster.HalfSize = ClusterHalfSize;
+				// A cluster only reads as incomplete when nothing in it defines every axis.
+				Cluster.bIncomplete &= bIncomplete;
 				continue;
 			}
 			Bins.Add(Bin, Result.Num());
@@ -153,6 +270,7 @@ TArray<SNarrativeSpaceViewport::FVisibleItem> SNarrativeSpaceViewport::VisibleIt
 		Item.Screen = Screen;
 		Item.HalfSize = Half;
 		Item.Indices.Add(Index);
+		Item.bIncomplete = bIncomplete;
 		Item.Depth = (Point.Position - Camera.Center).Dot(Normal);
 	}
 
@@ -270,6 +388,10 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 			Color.A = FMath::Clamp(1.0 / (1.0 + FMath::Abs(Item.Depth) * Camera.Zoom / 600.0), 0.35, 1.0);
 		}
 
+		// Entries missing one of the plotted axes recede instead of competing with complete ones.
+		const float IncompleteFade = Item.bIncomplete && IncompleteDisplay == ENarrativeSpaceIncomplete::Dim ? DimOpacity : 1.f;
+		Color.A *= IncompleteFade;
+
 		if (Item.Indices.Num() == 1 && Extent >= LargeCardSize && Point.Radius > 0)
 		{
 			const double Radius = Point.Radius * Camera.Zoom;
@@ -290,8 +412,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		Box(TopLeft, Item.HalfSize * 2, Color, CardLayer + 1);
 
 		// Hollow out the card so the border reads as an outline rather than a solid blob.
-		const bool bMissing = Point.PresentAxes != ((1 << AxisCount) - 1);
-		if (bMissing || Extent >= DetailCardSize || Item.Indices.Num() > 1)
+		if (Item.bIncomplete || Extent >= DetailCardSize || Item.Indices.Num() > 1)
 		{
 			Box(TopLeft + FVector2D(2), Item.HalfSize * 2 - FVector2D(4), CardInteriorColor, CardLayer + 2);
 		}
@@ -324,7 +445,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		for (int32 Axis = 0; Axis < AxisCount; ++Axis)
 		{
 			const FVector2D Marker = Item.Screen + Item.HalfSize - FVector2D(10 + Axis * 9, 8);
-			Box(Marker, FVector2D(6), AxisColors[Axis], CardLayer + 4);
+			Box(Marker, FVector2D(6), AxisColors[Axis].CopyWithNewOpacity(IncompleteFade), CardLayer + 4);
 			if (!(Point.PresentAxes & (1 << Axis)))
 			{
 				Box(Marker + FVector2D(1), FVector2D(4), CardInteriorColor, CardLayer + 5);
@@ -345,7 +466,8 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 					(Point.PresentAxes & (1 << Axis)) ? *FString::SanitizeFloat(Point.Position[Axis], 2) : TEXT("unset"));
 			}
 			Text(TopLeft + FVector2D(8, 36), Coordinates, Color, CardLayer + 3);
-			Text(TopLeft + FVector2D(8, 59), Point.Asset->GetClass()->GetName(), ClassTextColor, CardLayer + 3);
+			Text(TopLeft + FVector2D(8, 59), Point.Asset->GetClass()->GetName(),
+				ClassTextColor.CopyWithNewOpacity(IncompleteFade), CardLayer + 3);
 		}
 	}
 
@@ -357,12 +479,38 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		Line({A, FVector2D(B.X, A.Y), B, FVector2D(A.X, B.Y), A}, MarqueeOutlineColor, NextLayer + 1);
 	}
 
-	// HUD remains above every card, regardless of asset count.
+	// Axis labels ride their own axis line so each one is read in context. Above every card.
 	for (int32 Axis = 0; Axis < AxisCount && Axis < 3; ++Axis)
 	{
-		Text(FVector2D(14, 12 + Axis * 18),
-			FString::Printf(TEXT("%s: %s"), AxisLabel(Axis), *Query.Axes[Axis].GetAssetName()),
-			AxisColors[Axis], NextLayer + 2);
+		FVector2D Direction(Camera.Right[Axis], -Camera.Up[Axis]);
+		if (Direction.IsNearlyZero()) { continue; }
+		Direction.Normalize();
+
+		double Enter = 0.0;
+		double Exit = 0.0;
+		if (!ClipLineToRect(Origin, Direction, Size, Enter, Exit)) { continue; }
+
+		const FString Label = FString::Printf(TEXT("%s: %s"), AxisLabel(Axis), *Query.Axes[Axis].GetAssetName());
+		const double Length = Label.Len() * GlyphWidth;
+		// Skip rather than spill a label out of the short end of a barely visible axis.
+		if (Exit - Enter < Length + AxisLabelMargin * 2.0) { continue; }
+
+		// Glyphs never read right to left or bottom to top, so a vertical axis reads downward.
+		const bool bFlip = Direction.X < -UE_DOUBLE_SMALL_NUMBER
+			|| (FMath::Abs(Direction.X) <= UE_DOUBLE_SMALL_NUMBER && Direction.Y < 0.0);
+		const FVector2D Reading = bFlip ? -Direction : Direction;
+
+		// Anchor at the positive end of the visible segment. Unflipped text runs towards that end,
+		// so it starts a label's length back from it; flipped text already runs back from there.
+		FVector2D Anchor = Origin + Direction * (Exit - AxisLabelMargin);
+		if (!bFlip) { Anchor -= Direction * Length; }
+		// Glyphs hang off the anchor along the rotated frame's +Y, so nudge that way to clear the line.
+		Anchor += FVector2D(-Reading.Y, Reading.X) * 4.0;
+
+		FSlateDrawElement::MakeText(OutElements, NextLayer + 2,
+			Geometry.ToPaintGeometry(FVector2D(Length, 16.0), FSlateLayoutTransform(Anchor),
+				FSlateRenderTransform(FQuat2D(float(FMath::Atan2(Reading.Y, Reading.X)))), FVector2D::ZeroVector),
+			Label, Font, ESlateDrawEffect::None, AxisColors[Axis]);
 	}
 	if (Points.IsEmpty())
 	{
@@ -538,8 +686,9 @@ FReply SNarrativeSpaceViewport::OnKeyDown(const FGeometry& Geometry, const FKeyE
 		return FReply::Handled();
 	}
 
-	// Camera and undo shortcuts would fight an in-progress gesture.
+	// Camera, selection and undo shortcuts would fight an in-progress gesture.
 	if (HasMouseCapture()) { return FReply::Handled(); }
+	if (Key == EKeys::Tab) { SelectNext(Event.IsShiftDown() ? -1 : 1); return FReply::Handled(); }
 	if (Key == EKeys::F) { FrameAll(true); return FReply::Handled(); }
 	if (Key == EKeys::Home) { FrameAll(); return FReply::Handled(); }
 	if (Event.IsControlDown() && GEditor)

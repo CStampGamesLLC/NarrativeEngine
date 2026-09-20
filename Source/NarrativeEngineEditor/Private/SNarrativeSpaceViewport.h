@@ -23,6 +23,15 @@ public:
 	/** Restores the default camera and reframes once the widget has been given a size. */
 	void ResetCamera();
 
+	/**
+	 * Moves the selection one entry along reading order: down the current column, then on to the
+	 * top of the next column to the right. Step of -1 walks back. Pans if the entry is off screen.
+	 */
+	void SelectNext(int32 Step);
+
+	/** Chooses how entries that leave one of the plotted axes undefined are drawn. */
+	void SetIncompleteDisplay(ENarrativeSpaceIncomplete Mode);
+
 	//~ Begin SWidget interface
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override { return FVector2D(800, 600); }
@@ -50,6 +59,8 @@ private:
 		FVector2D HalfSize;
 		TArray<int32> Indices;
 		double Depth = 0.0;
+		/** True only when every point in this item is missing one of the plotted axes. */
+		bool bIncomplete = false;
 	};
 
 	TSharedPtr<FNarrativeSpaceModel> Model;
@@ -67,9 +78,19 @@ private:
 	bool bAddSelection = false;
 	int32 AxisLock = INDEX_NONE;
 	bool bFramePending = false;
+	ENarrativeSpaceIncomplete IncompleteDisplay = ENarrativeSpaceIncomplete::Dim;
 
 	/** Card edge length in pixels at the current zoom; drives every level-of-detail threshold. */
 	double CardSize() const;
+
+	/** Card width on screen, which is also the column width Tab walks down. */
+	double ColumnWidth() const;
+
+	/** True when the asset leaves one of the plotted axes undefined. */
+	bool IsIncomplete(const FNarrativeSpacePoint& Point) const;
+
+	/** True when the point is kept out of the viewport, framing and hit testing entirely. */
+	bool IsHidden(const FNarrativeSpacePoint& Point) const;
 
 	/** Projects and culls the model's points, back to front, clustering them when cards get small. */
 	TArray<FVisibleItem> VisibleItems(const FVector2D& Size) const;

@@ -30,6 +30,7 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 	Model->OnSelectionChanged.AddSP(this, &SNarrativeSpaceEditor::SelectionChanged);
 
 	SAssignNew(Viewport, SNarrativeSpaceViewport).Model(Model);
+	Viewport->SetIncompleteDisplay(Settings->Incomplete);
 	Viewport->ResetCamera();
 
 	CreateFieldPicker();
@@ -90,7 +91,7 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 		[
 			SNew(STextBlock)
 			.AutoWrapText(true)
-			.Text(LOCTEXT("Help", "Drag: move | Shift-click / marquee: select | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB/MMB: pan | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | Ctrl+Z/Y: undo/redo. Editing is disabled during PIE."))
+			.Text(LOCTEXT("Help", "Drag: move | Shift-click / marquee: select | Tab / Shift-Tab: step through entries | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB/MMB: pan | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | Ctrl+Z/Y: undo/redo. Editing is disabled during PIE."))
 		]
 	];
 }
@@ -196,7 +197,18 @@ TSharedRef<SWidget> SNarrativeSpaceEditor::CreateToolbar()
 
 void SNarrativeSpaceEditor::QueryChanged(const FPropertyChangedEvent& Event)
 {
-	const bool bAxesChanged = Model->GetQuery().Axes != Settings->Query.Axes;
+	Viewport->SetIncompleteDisplay(Settings->Incomplete);
+
+	// Incomplete is display only, and SetQuery always reloads every matching asset. Only re-run
+	// the query when the query itself moved, so toggling the display option stays cheap.
+	const FNarrativeSpaceQuery& Current = Model->GetQuery();
+	const bool bAxesChanged = Current.Axes != Settings->Query.Axes;
+	const bool bQueryChanged = bAxesChanged
+		|| Current.Classes != Settings->Query.Classes
+		|| Current.ContentPath != Settings->Query.ContentPath
+		|| Current.PlacementField != Settings->Query.PlacementField;
+	if (!bQueryChanged) { return; }
+
 	Model->SetQuery(Settings->Query);
 	if (bAxesChanged) { Viewport->ResetCamera(); }
 }
