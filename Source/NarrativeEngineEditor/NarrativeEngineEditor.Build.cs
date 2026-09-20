@@ -28,7 +28,8 @@ public class NarrativeEngineEditor : ModuleRules
                 "InputCore",
                 "ToolMenus",
                 "WorkspaceMenuStructure",
-                "AssetRegistry"
+                "AssetRegistry",
+                "AssetTools"
             }
         );
 

@@ -3,6 +3,8 @@
 #include "NarrativeSpaceModel.h"
 #include "Widgets/SLeafWidget.h"
 
+class FMenuBuilder;
+
 /** One paint/input surface, with no per-asset widget tree. */
 class SNarrativeSpaceViewport : public SLeafWidget
 {
@@ -99,6 +101,18 @@ private:
 	TArray<int32> Hit(const FVector2D& At, const FVector2D& Size) const;
 
 	void ApplyDrag(const FVector2D& At, bool bSnap);
+
+	/** Opens the viewport context menu for a right click that did not turn into a pan. */
+	void ShowContextMenu(const FVector2D& At, const FVector2D& ScreenPosition);
+
+	/** Fills the Make New submenu with the classes this query can plot. */
+	void BuildMakeNewMenu(FMenuBuilder& Builder, FVector2D At);
+
+	/** Creates one asset of Class at the local-space point the context menu was opened on. */
+	void CreateAssetAt(TWeakObjectPtr<UClass> Class, FVector2D At);
+
+	/** Deletes the selected assets outright, through the editor's confirmation dialog. */
+	void DeleteSelection();
 
 	/** Ends any drag, pan, orbit or marquee and clears the axis lock. */
 	void FinishInteraction(bool bCancel);

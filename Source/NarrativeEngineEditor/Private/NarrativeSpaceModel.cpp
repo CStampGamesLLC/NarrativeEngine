@@ -1,13 +1,16 @@
 ﻿#include "NarrativeSpaceModel.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetToolsModule.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "FileHelpers.h"
 #include "Misc/PackageName.h"
+#include "ObjectTools.h"
 #include "ScopedTransaction.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "UObject/Package.h"
+#include "UObject/UObjectHash.h"
 #include "UObject/UnrealType.h"
 
 #define LOCTEXT_NAMESPACE "NarrativeSpace"
@@ -119,6 +122,7 @@ double FNarrativeSpaceCamera::GridStep() const
 
 FNarrativeSpaceModel::FNarrativeSpaceModel()
 {
+	CreationRecord = NewObject<UNarrativeSpaceCreationRecord>(GetTransientPackage(), NAME_None, RF_Transactional);
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 	Registry.OnAssetAdded().AddRaw(this, &FNarrativeSpaceModel::AssetChanged);
 	Registry.OnAssetRemoved().AddRaw(this, &FNarrativeSpaceModel::AssetChanged);
@@ -146,6 +150,8 @@ void FNarrativeSpaceModel::AddReferencedObjects(FReferenceCollector& Collector)
 {
 	Collector.AddReferencedObjects(LoadedAssets);
 	Collector.AddReferencedObjects(LoadedIcons);
+	Collector.AddReferencedObjects(CreatedAssets);
+	Collector.AddReferencedObject(CreationRecord);
 	Collector.AddPropertyReferences(FNarrativeSpaceQuery::StaticStruct(), &Query);
 }
 
@@ -166,6 +172,140 @@ FStructProperty* FNarrativeSpaceModel::ResolvePlacement(UNarrativeDataAsset* Ass
 	if (Property && (Property->Struct != FVectorND::StaticStruct() || Property->ArrayDim != 1 || !Property->HasAnyPropertyFlags(CPF_Edit) || Property->HasAnyPropertyFlags(CPF_EditConst))) { Property = nullptr; }
 	PlacementCache.Add(Asset->GetClass(), Property);
 	return Property;
+}
+
+TArray<UClass*> FNarrativeSpaceModel::GetCreatableClasses()
+{
+	TArray<UClass*> Candidates;
+	GetDerivedClasses(UNarrativeDataAsset::StaticClass(), Candidates, true);
+	Candidates.Add(UNarrativeDataAsset::StaticClass());
+
+	TArray<UClass*> Result;
+	for (UClass* Class : Candidates)
+	{
+		if (!Class || Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)) { continue; }
+		// Skeleton and reinstanced classes are blueprint compilation artifacts, not authorable types.
+		if (Class->GetName().StartsWith(TEXT("SKEL_")) || Class->GetName().StartsWith(TEXT("REINST_"))) { continue; }
+		if (!Query.Classes.IsEmpty())
+		{
+			const bool bMatches = Query.Classes.ContainsByPredicate([Class](const TSubclassOf<UNarrativeDataAsset>& Filter)
+			{
+				return Filter && Class->IsChildOf(Filter);
+			});
+			if (!bMatches) { continue; }
+		}
+		// Offer only classes whose placement field resolves, so anything created is actually plotted.
+		if (!ResolvePlacement(Class->GetDefaultObject<UNarrativeDataAsset>())) { continue; }
+		Result.Add(Class);
+	}
+	Result.Sort([](const UClass& A, const UClass& B)
+	{
+		return A.GetDisplayNameText().ToString() < B.GetDisplayNameText().ToString();
+	});
+	return Result;
+}
+
+UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVector& Position)
+{
+	if (!CanEdit() || !Class || !Class->IsChildOf(UNarrativeDataAsset::StaticClass())) { return nullptr; }
+	if (!CreationRecord || GIsTransacting || GEditor->IsTransactionActive()) { return nullptr; }
+	EndDrag(true);
+
+	// The record is what actually gets transacted; see UNarrativeSpaceCreationRecord.
+	const FScopedTransaction CreateTransaction(LOCTEXT("MakeNew", "Create narrative asset"));
+	CreationRecord->Modify();
+
+	FString BaseName = Class->GetName();
+	BaseName.RemoveFromEnd(TEXT("_C"));
+	const FString Path = Query.ContentPath.IsEmpty() ? TEXT("/Game") : Query.ContentPath;
+
+	FString PackageName;
+	FString AssetName;
+	FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get()
+		.CreateUniqueAssetName(Path / (TEXT("New") + BaseName), TEXT(""), PackageName, AssetName);
+
+	UPackage* Package = CreatePackage(*PackageName);
+	if (!Package) { return nullptr; }
+	UNarrativeDataAsset* Asset = NewObject<UNarrativeDataAsset>(Package, Class, *AssetName,
+		RF_Public | RF_Standalone | RF_Transactional);
+	if (!Asset) { return nullptr; }
+
+	// Author the placement before Refresh reads positions back out of the asset.
+	if (FStructProperty* Property = ResolvePlacement(Asset))
+	{
+		FVectorND& Vector = *Property->ContainerPtrToValuePtr<FVectorND>(Asset);
+		for (int32 Axis = 0; Axis < Query.Axes.Num(); ++Axis)
+		{
+			Vector.SetCoordinate(Query.Axes[Axis], float(Position[Axis]));
+		}
+	}
+
+	FAssetRegistryModule::AssetCreated(Asset);
+	Package->MarkPackageDirty();
+
+	// The new package stays dirty until an explicit save, undone or not.
+	CreationRecord->Created.Add(Asset);
+	CreatedAssets.Add(Asset);
+	LiveCreated.Add(Asset);
+
+	Refresh();
+	Select({Asset});
+	return Asset;
+}
+
+int32 FNarrativeSpaceModel::DeleteAssets(const TArray<UNarrativeDataAsset*>& Assets, bool bShowConfirmation)
+{
+	if (!CanEdit() || Assets.IsEmpty()) { return 0; }
+	EndDrag(true);
+
+	TArray<UObject*> Objects;
+	for (UNarrativeDataAsset* Asset : Assets)
+	{
+		if (Asset && IsValid(Asset)) { Objects.AddUnique(Asset); }
+	}
+	if (Objects.IsEmpty()) { return 0; }
+
+	/** What we were tracking about a doomed asset, so a declined delete can be put back. */
+	struct FDoomed
+	{
+		TWeakObjectPtr<UNarrativeDataAsset> Asset;
+		bool bTracked = false;
+		bool bRecorded = false;
+		bool bLive = false;
+	};
+	TArray<FDoomed> Doomed;
+	Doomed.Reserve(Objects.Num());
+	for (UObject* Object : Objects)
+	{
+		UNarrativeDataAsset* Asset = CastChecked<UNarrativeDataAsset>(Object);
+		FDoomed& Entry = Doomed.AddDefaulted_GetRef();
+		Entry.Asset = Asset;
+		// Our own strong references send ObjectTools down its force-delete path, which frees the
+		// object outright and leaves every raw pointer to it dangling. Let go of them first.
+		Entry.bTracked = CreatedAssets.Remove(Asset) > 0;
+		Entry.bRecorded = CreationRecord && CreationRecord->Created.Remove(Asset) > 0;
+		Entry.bLive = LiveCreated.Remove(Entry.Asset) > 0;
+		Selection.Remove(Entry.Asset);
+		LoadedAssets.Remove(Asset);
+	}
+
+	// ObjectTools runs the editor's own confirmation and reference check. This is not undoable.
+	const int32 Deleted = ObjectTools::DeleteObjects(Objects, bShowConfirmation);
+
+	// Objects is off limits from here: those pointers may name freed memory, and even building a
+	// TWeakObjectPtr from one would index the object array with -1. The weak handles are safe.
+	for (const FDoomed& Entry : Doomed)
+	{
+		UNarrativeDataAsset* Asset = Entry.Asset.Get();
+		// Survived, so the user declined. Put it back on the books; its create is still undoable.
+		if (!Asset) { continue; }
+		if (Entry.bTracked) { CreatedAssets.Add(Asset); }
+		if (Entry.bRecorded && CreationRecord) { CreationRecord->Created.Add(Asset); }
+		if (Entry.bLive) { LiveCreated.Add(Entry.Asset); }
+	}
+
+	Refresh();
+	return Deleted;
 }
 
 void FNarrativeSpaceModel::Refresh()
@@ -369,7 +509,41 @@ void FNarrativeSpaceModel::OpenSelection()
 	if (GEditor) { GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAssets(GetSelection()); }
 }
 
-void FNarrativeSpaceModel::PostUndo(bool bSuccess) { if (bSuccess) { bRefreshPending = true; } }
+void FNarrativeSpaceModel::PostUndo(bool bSuccess)
+{
+	if (!bSuccess) { return; }
+	SyncCreatedAssets();
+	bRefreshPending = true;
+}
+
+void FNarrativeSpaceModel::SyncCreatedAssets()
+{
+	if (!CreationRecord) { return; }
+	for (const TObjectPtr<UNarrativeDataAsset>& Created : CreatedAssets)
+	{
+		UNarrativeDataAsset* Asset = Created.Get();
+		// A destructive delete can retire an asset that undo would otherwise try to resurrect.
+		if (!Asset || !IsValid(Asset)) { continue; }
+
+		const bool bShouldBeLive = CreationRecord->Created.Contains(Asset);
+		if (bShouldBeLive == LiveCreated.Contains(Asset)) { continue; }
+		if (bShouldBeLive)
+		{
+			Asset->SetFlags(RF_Public | RF_Standalone);
+			FAssetRegistryModule::AssetCreated(Asset);
+			Asset->GetPackage()->MarkPackageDirty();
+			LiveCreated.Add(Asset);
+		}
+		else
+		{
+			// The asset is unsaved either way, so dropping it from the registry undoes the create.
+			FAssetRegistryModule::AssetDeleted(Asset);
+			Asset->ClearFlags(RF_Public | RF_Standalone);
+			Asset->GetPackage()->SetDirtyFlag(false);
+			LiveCreated.Remove(Asset);
+		}
+	}
+}
 void FNarrativeSpaceModel::PropertyChanged(UObject* Object, FPropertyChangedEvent& Event)
 {
 	if (bOwnChange || !Object || !Object->IsA<UNarrativeDataAsset>()) { return; }

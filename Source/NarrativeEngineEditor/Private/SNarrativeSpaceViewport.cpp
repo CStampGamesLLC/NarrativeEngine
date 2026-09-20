@@ -2,9 +2,14 @@
 
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "Editor.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
+#include "Widgets/Text/STextBlock.h"
+
+#define LOCTEXT_NAMESPACE "NarrativeSpaceViewport"
 
 namespace NarrativeSpaceDraw
 {
@@ -29,6 +34,9 @@ namespace NarrativeSpaceDraw
 	const FLinearColor ClassTextColor(0.5f, 0.6f, 0.7f);
 	const FLinearColor HudTextColor(0.6f, 0.7f, 0.8f);
 	const FLinearColor AxisColors[] = {FLinearColor(1.f, 0.3f, 0.25f), FLinearColor(0.3f, 0.85f, 0.4f), FLinearColor(0.3f, 0.6f, 1.f)};
+
+	/** Pointer travel, in pixels, that separates a click from a drag or a pan. */
+	constexpr double ClickThreshold = 4.0;
 
 	/** Opacity applied to an entry that leaves one of the plotted axes undefined, when dimmed. */
 	constexpr float DimOpacity = 0.25f;
@@ -605,8 +613,92 @@ FReply SNarrativeSpaceViewport::OnMouseButtonUp(const FGeometry& Geometry, const
 		Model->Select(Assets, bAddSelection);
 	}
 
+	// A right click that never travelled was a menu request, not a pan.
+	const bool bContextClick = Event.GetEffectingButton() == EKeys::RightMouseButton
+		&& (Geometry.AbsoluteToLocal(Event.GetScreenSpacePosition()) - MouseDown).Size() < NarrativeSpaceDraw::ClickThreshold;
+
 	FinishInteraction(false);
+	if (bContextClick)
+	{
+		// Target what was clicked, so Delete acts on something the user can see is selected.
+		const TArray<int32> Indices = Hit(MouseDown, Geometry.GetLocalSize());
+		if (!Indices.IsEmpty())
+		{
+			TArray<UNarrativeDataAsset*> Assets;
+			for (int32 Index : Indices) { Assets.Add(Model->GetPoints()[Index].Asset.Get()); }
+			const bool bAlreadySelected = Assets.ContainsByPredicate(
+				[this](UNarrativeDataAsset* Asset) { return Model->IsSelected(Asset); });
+			if (!bAlreadySelected) { Model->Select(Assets); }
+		}
+		ShowContextMenu(MouseDown, Event.GetScreenSpacePosition());
+	}
 	return FReply::Handled().ReleaseMouseCapture();
+}
+
+void SNarrativeSpaceViewport::ShowContextMenu(const FVector2D& At, const FVector2D& ScreenPosition)
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	MenuBuilder.BeginSection(TEXT("NarrativeSpaceCreate"), LOCTEXT("CreateSection", "Narrative Space"));
+	MenuBuilder.AddSubMenu(
+		LOCTEXT("MakeNew", "Make New"),
+		LOCTEXT("MakeNewTip", "Create a narrative data asset at this point, in the query's content path. The new asset is left unsaved."),
+		FNewMenuDelegate::CreateSP(this, &SNarrativeSpaceViewport::BuildMakeNewMenu, At));
+	const int32 SelectionCount = Model->GetSelection().Num();
+	MenuBuilder.AddMenuEntry(
+		SelectionCount > 1
+			? FText::Format(LOCTEXT("DeleteMany", "Delete {0} Assets"), FText::AsNumber(SelectionCount))
+			: LOCTEXT("DeleteOne", "Delete Asset"),
+		LOCTEXT("DeleteTip", "Delete the selected assets outright, with the editor's usual confirmation and reference check. This cannot be undone."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::DeleteSelection),
+			FCanExecuteAction::CreateLambda([this] { return Model->CanEdit() && !Model->GetSelection().IsEmpty(); })));
+	MenuBuilder.EndSection();
+
+	FSlateApplication::Get().PushMenu(SharedThis(this), FWidgetPath(), MenuBuilder.MakeWidget(),
+		ScreenPosition, FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
+}
+
+void SNarrativeSpaceViewport::BuildMakeNewMenu(FMenuBuilder& Builder, FVector2D At)
+{
+	const TArray<UClass*> Classes = Model->GetCreatableClasses();
+	if (Classes.IsEmpty())
+	{
+		Builder.AddWidget(SNew(STextBlock)
+			.Text(LOCTEXT("NoClasses", "No class in this query has a usable placement field."))
+			.Margin(FMargin(12.f, 4.f)), FText::GetEmpty());
+		return;
+	}
+
+	for (UClass* Class : Classes)
+	{
+		const FText Name = Class->GetDisplayNameText();
+		Builder.AddMenuEntry(
+			Name,
+			FText::Format(LOCTEXT("MakeNewClassTip", "Create a new {0} here."), Name),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::CreateAssetAt, TWeakObjectPtr<UClass>(Class), At),
+				FCanExecuteAction::CreateSP(Model.ToSharedRef(), &FNarrativeSpaceModel::CanEdit)));
+	}
+}
+
+void SNarrativeSpaceViewport::CreateAssetAt(TWeakObjectPtr<UClass> Class, FVector2D At)
+{
+	if (Class.IsValid()) { Model->CreateAsset(Class.Get(), Camera.Unproject(At, ViewportSize)); }
+}
+
+void SNarrativeSpaceViewport::DeleteSelection()
+{
+	TArray<UNarrativeDataAsset*> Assets;
+	for (UObject* Object : Model->GetSelection())
+	{
+		if (UNarrativeDataAsset* Asset = Cast<UNarrativeDataAsset>(Object)) { Assets.Add(Asset); }
+	}
+	if (Assets.IsEmpty()) { return; }
+
+	FinishInteraction(true);
+	Model->DeleteAssets(Assets);
 }
 
 FReply SNarrativeSpaceViewport::OnMouseMove(const FGeometry& Geometry, const FPointerEvent& Event)
@@ -620,7 +712,7 @@ FReply SNarrativeSpaceViewport::OnMouseMove(const FGeometry& Geometry, const FPo
 		else if (bPendingDrag || Model->IsDragging())
 		{
 			// Only open a transaction once the pointer clears the click threshold.
-			if (bPendingDrag && (At - MouseDown).Size() >= 4.0)
+			if (bPendingDrag && (At - MouseDown).Size() >= NarrativeSpaceDraw::ClickThreshold)
 			{
 				bPendingDrag = false;
 				Model->BeginDrag();
@@ -689,6 +781,7 @@ FReply SNarrativeSpaceViewport::OnKeyDown(const FGeometry& Geometry, const FKeyE
 	// Camera, selection and undo shortcuts would fight an in-progress gesture.
 	if (HasMouseCapture()) { return FReply::Handled(); }
 	if (Key == EKeys::Tab) { SelectNext(Event.IsShiftDown() ? -1 : 1); return FReply::Handled(); }
+	if (Key == EKeys::Delete) { DeleteSelection(); return FReply::Handled(); }
 	if (Key == EKeys::F) { FrameAll(true); return FReply::Handled(); }
 	if (Key == EKeys::Home) { FrameAll(); return FReply::Handled(); }
 	if (Event.IsControlDown() && GEditor)
@@ -756,3 +849,5 @@ FReply SNarrativeSpaceViewport::OnDrop(const FGeometry& Geometry, const FDragDro
 	}
 	return FReply::Handled().SetUserFocus(AsShared(), EFocusCause::Mouse);
 }
+
+#undef LOCTEXT_NAMESPACE

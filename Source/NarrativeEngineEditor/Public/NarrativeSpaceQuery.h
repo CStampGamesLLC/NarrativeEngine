@@ -39,6 +39,21 @@ struct NARRATIVEENGINEEDITOR_API FNarrativeSpaceQuery
 	bool Validate(FText& OutError) const;
 };
 
+/**
+ * Transacted stand-in for package contents, so Make New can be undone. UE can restore an object's
+ * saved state but cannot un-create one, and a package has no transacted contents array the way a
+ * level has ULevel::Actors. Undo therefore drops the asset from this array and the model
+ * unregisters it; redo puts it back and the model registers it again.
+ */
+UCLASS(Transient)
+class NARRATIVEENGINEEDITOR_API UNarrativeSpaceCreationRecord : public UObject
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY()
+	TArray<TObjectPtr<UNarrativeDataAsset>> Created;
+};
+
 /** Transient details-panel adapter, never saved into game content. */
 UCLASS(Transient)
 class NARRATIVEENGINEEDITOR_API UNarrativeSpaceSettings : public UObject

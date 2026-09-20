@@ -67,6 +67,21 @@ public:
 	void EndDrag(bool bCancel = false);
 	void Save();
 	void OpenSelection();
+
+	/** Concrete classes this query can plot, sorted by display name, for the Make New menu. */
+	TArray<UClass*> GetCreatableClasses();
+
+	/**
+	 * Creates an unsaved data asset of Class under the query's content path, places it at Position
+	 * and selects it. Null when the query, the class or its placement field will not allow it.
+	 */
+	UNarrativeDataAsset* CreateAsset(UClass* Class, const FVector& Position);
+
+	/**
+	 * Deletes assets through the editor's own confirmation and reference check. Destructive and
+	 * outside the undo buffer, exactly like deleting from the Content Browser. Returns the count.
+	 */
+	int32 DeleteAssets(const TArray<UNarrativeDataAsset*>& Assets, bool bShowConfirmation = true);
 	FStructProperty* ResolvePlacement(UNarrativeDataAsset* Asset);
 	FSimpleMulticastDelegate OnSelectionChanged;
 
@@ -96,6 +111,10 @@ private:
 	TArray<FDragOriginal> Originals;
 	TMap<TWeakObjectPtr<UPackage>, bool> PackageDirtyBefore;
 	TUniquePtr<FScopedTransaction> Transaction;
+	TObjectPtr<UNarrativeSpaceCreationRecord> CreationRecord;
+	/** Everything Make New produced this session, kept alive so undo and redo can toggle it. */
+	TArray<TObjectPtr<UNarrativeDataAsset>> CreatedAssets;
+	TSet<TWeakObjectPtr<UNarrativeDataAsset>> LiveCreated;
 	FText Status;
 	bool bQueryValid = false;
 	bool bRefreshPending = false;
@@ -104,6 +123,9 @@ private:
 	bool bOwnChange = false;
 
 	void ReadPoints();
+
+	/** Brings created assets' registration back in line with the transacted creation record. */
+	void SyncCreatedAssets();
 	void PropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
 	void AssetChanged(const FAssetData& Asset);
 	void AssetRenamed(const FAssetData& Asset, const FString& OldPath);
