@@ -344,8 +344,12 @@ bool FNarrativeSpaceRenderTest::RunTest(const FString& Parameters)
 		if (TestTrue(TEXT("Editor contains reusable viewport"), Viewport.IsValid()))
 		{
 			const FGeometry Geometry = Viewport->GetCachedGeometry();
+			// Entries missing an axis are hidden by default, and the viewport frames what it draws.
 			TArray<FVector> Positions;
-			for (const auto& Point : Widget->GetModel()->GetPoints()) { Positions.Add(Point.Position); }
+			for (const auto& Point : Widget->GetModel()->GetPoints())
+			{
+				if (Point.PresentAxes == 0b11) { Positions.Add(Point.Position); }
+			}
 			FNarrativeSpaceCamera ExpectedCamera;
 			ExpectedCamera.Frame(Positions, Geometry.GetLocalSize());
 			const FVector2D Screen = Geometry.LocalToAbsolute(ExpectedCamera.Project(FVector(-8, 4, 0), Geometry.GetLocalSize()));

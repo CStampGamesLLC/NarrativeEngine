@@ -14,6 +14,15 @@ struct FAssetData;
 
 enum class ENarrativeSpaceView : uint8 { XY, XZ, YZ, Iso };
 
+/** Which set of values the viewport plots. */
+enum class ENarrativeSpaceSource : uint8
+{
+	/** Authored asset values. Editable, including while a play session runs.  */
+	Static,
+	/** The play session's simulated entity positions. A live view; the simulation owns them. */
+	Runtime
+};
+
 /** How a query axis presents itself, shared by the viewport and the axis picker. */
 namespace NarrativeSpaceAxis
 {
@@ -48,6 +57,8 @@ struct FNarrativeSpacePoint
 	FVector Position = FVector::ZeroVector;
 	uint8 PresentAxes = 0;
 	float Radius = 0.f;
+	/** True when this position came from a simulated entity rather than from the asset. */
+	bool bLive = false;
 	FText Label;
 	FLinearColor Color;
 	FSlateBrush Icon;
@@ -60,6 +71,10 @@ public:
 	FNarrativeSpaceModel();
 	virtual ~FNarrativeSpaceModel() override;
 	bool SetQuery(const FNarrativeSpaceQuery& InQuery);
+
+	/** Switches between authored and simulated values. Cancels any drag the change would strand. */
+	void SetSource(ENarrativeSpaceSource InSource);
+	ENarrativeSpaceSource GetSource() const { return Source; }
 	void Refresh();
 	void Tick();
 	const FNarrativeSpaceQuery& GetQuery() const { return Query; }
@@ -69,9 +84,20 @@ public:
 	/** Union of editable vector fields on matching assets, including inherited fields and omitted assets. */
 	const TArray<FName>& GetPlacementFields() const { return PlacementFields; }
 	const FText& GetStatus() const { return Status; }
+
+	/** What the current source is showing, and whether a play session is backing it. */
+	FText GetSourceStatus() const;
 	bool IsQueryValid() const { return bQueryValid; }
 	bool IsDragging() const { return Transaction.IsValid(); }
+
+	/** True when authored values can be edited at all. A play session does not stop this. */
 	bool CanEdit() const;
+
+	/** True when dragging authors asset values. Runtime values belong to the simulation, not here. */
+	bool CanPlace() const;
+
+	/** True when assets may be created, renamed or deleted. Never while a play session holds them. */
+	bool CanManageAssets() const;
 	TArray<UObject*> GetSelection() const;
 	bool IsSelected(const UNarrativeDataAsset* Asset) const;
 	void Select(const TArray<UNarrativeDataAsset*>& Assets, bool bAdd = false);
@@ -137,6 +163,7 @@ private:
 		TFieldPath<FStructProperty> Property;
 	};
 	FNarrativeSpaceQuery Query;
+	ENarrativeSpaceSource Source = ENarrativeSpaceSource::Static;
 	TArray<FNarrativeSpacePoint> Points;
 	TArray<TSoftObjectPtr<UNarrativeBasisVector>> BasisAssets;
 	TArray<FName> PlacementFields;
@@ -152,6 +179,10 @@ private:
 	TArray<TObjectPtr<UNarrativeDataAsset>> CreatedAssets;
 	TSet<TWeakObjectPtr<UNarrativeDataAsset>> LiveCreated;
 	FText Status;
+	/** How many points the last read took from the simulation rather than from their asset. */
+	int32 LiveCount = 0;
+	FDelegateHandle PlayStartedHandle;
+	FDelegateHandle PlayEndedHandle;
 	bool bQueryValid = false;
 	bool bRefreshPending = false;
 	/** An in-flight interactive edit: re-read positions, but leave the details panel alone. */
@@ -165,6 +196,12 @@ private:
 
 	/** Brings created assets' registration back in line with the transacted creation record. */
 	void SyncCreatedAssets();
+	/** A play session started or ended, so the values behind every point may have just changed. */
+	void PlaySessionChanged(bool bSimulating);
+
+	/** Pushes a dragged entity's new authored point into any session already simulating it. */
+	void PushDragToPlaySession() const;
+
 	void PropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
 	void AssetChanged(const FAssetData& Asset);
 	void AssetRenamed(const FAssetData& Asset, const FString& OldPath);

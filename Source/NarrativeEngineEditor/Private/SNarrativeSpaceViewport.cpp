@@ -36,6 +36,8 @@ namespace NarrativeSpaceDraw
 	const FLinearColor MarqueeFillColor(0.15f, 0.45f, 0.9f, 0.12f);
 	const FLinearColor MarqueeOutlineColor(0.3f, 0.6f, 1.f);
 	const FLinearColor ClassTextColor(0.5f, 0.6f, 0.7f);
+	/** Marks a card whose position is coming from the running simulation rather than its asset. */
+	const FLinearColor LiveColor(0.2f, 0.9f, 0.8f);
 	const FLinearColor HudTextColor(0.6f, 0.7f, 0.8f);
 
 	/** Pointer travel, in pixels, that separates a click from a drag or a pan. */
@@ -263,6 +265,7 @@ TArray<SNarrativeSpaceViewport::FVisibleItem> SNarrativeSpaceViewport::VisibleIt
 				Cluster.HalfSize = ClusterHalfSize;
 				// A cluster only reads as incomplete when nothing in it defines every axis.
 				Cluster.bIncomplete &= bIncomplete;
+				Cluster.bLive |= Point.bLive;
 				continue;
 			}
 			Bins.Add(Bin, Result.Num());
@@ -273,6 +276,7 @@ TArray<SNarrativeSpaceViewport::FVisibleItem> SNarrativeSpaceViewport::VisibleIt
 		Item.HalfSize = Half;
 		Item.Indices.Add(Index);
 		Item.bIncomplete = bIncomplete;
+		Item.bLive = Point.bLive;
 		Item.Depth = (Point.Position - Camera.Center).Dot(Normal);
 	}
 
@@ -419,6 +423,13 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 			Box(TopLeft + FVector2D(2), Item.HalfSize * 2 - FVector2D(4), CardInteriorColor, CardLayer + 2);
 		}
 
+		// A pip in the top-right corner: this card is tracking a simulated entity, not its asset.
+		if (Item.bLive && Extent >= GlyphCardSize)
+		{
+			Box(Item.Screen + FVector2D(Item.HalfSize.X - 9, -Item.HalfSize.Y + 3), FVector2D(6),
+				LiveColor.CopyWithNewOpacity(Color.A), CardLayer + 3);
+		}
+
 		if (Item.Indices.Num() > 1)
 		{
 			Text(TopLeft + FVector2D(5, 7), FString::Printf(TEXT("x%d"), Item.Indices.Num()), Color, CardLayer + 3);
@@ -522,7 +533,8 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		? FString(TEXT("View-plane drag"))
 		: FString::Printf(TEXT("%s locked"), NarrativeSpaceAxis::Label(AxisLock));
 	Text(FVector2D(14, Size.Y - 24),
-		FString::Printf(TEXT("Grid %g | Zoom %.2f | %s"), Camera.GridStep(), Camera.Zoom, *LockLabel),
+		FString::Printf(TEXT("Grid %g | Zoom %.2f | %s | %s"), Camera.GridStep(), Camera.Zoom, *LockLabel,
+			Model->GetSource() == ENarrativeSpaceSource::Runtime ? TEXT("Runtime") : TEXT("Static")),
 		HudTextColor, NextLayer + 2);
 
 	return NextLayer + 3;
@@ -573,7 +585,7 @@ FReply SNarrativeSpaceViewport::OnMouseButtonDown(const FGeometry& Geometry, con
 			}
 
 			if (bAddSelection || !Model->IsSelected(Assets[0])) { Model->Select(Assets, bAddSelection); }
-			bPendingDrag = Model->CanEdit();
+			bPendingDrag = Model->CanPlace();
 		}
 	}
 	else { return FReply::Unhandled(); }
@@ -646,7 +658,7 @@ void SNarrativeSpaceViewport::ShowContextMenu(const FVector2D& At, const FVector
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::BeginRename),
-			FCanExecuteAction::CreateLambda([this] { return Model->CanEdit() && !Model->GetSelection().IsEmpty(); })));
+			FCanExecuteAction::CreateLambda([this] { return Model->CanManageAssets() && !Model->GetSelection().IsEmpty(); })));
 	MenuBuilder.AddMenuEntry(
 		SelectionCount > 1
 			? FText::Format(LOCTEXT("DeleteMany", "Delete {0} Assets"), FText::AsNumber(SelectionCount))
@@ -655,7 +667,7 @@ void SNarrativeSpaceViewport::ShowContextMenu(const FVector2D& At, const FVector
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::DeleteSelection),
-			FCanExecuteAction::CreateLambda([this] { return Model->CanEdit() && !Model->GetSelection().IsEmpty(); })));
+			FCanExecuteAction::CreateLambda([this] { return Model->CanManageAssets() && !Model->GetSelection().IsEmpty(); })));
 	MenuBuilder.EndSection();
 
 	FSlateApplication::Get().PushMenu(SharedThis(this), FWidgetPath(), MenuBuilder.MakeWidget(),
@@ -682,7 +694,7 @@ void SNarrativeSpaceViewport::BuildMakeNewMenu(FMenuBuilder& Builder, FVector2D 
 			FSlateIcon(),
 			FUIAction(
 				FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::CreateAssetAt, TWeakObjectPtr<UClass>(Class), At),
-				FCanExecuteAction::CreateSP(Model.ToSharedRef(), &FNarrativeSpaceModel::CanEdit)));
+				FCanExecuteAction::CreateSP(Model.ToSharedRef(), &FNarrativeSpaceModel::CanManageAssets)));
 	}
 }
 
@@ -713,7 +725,11 @@ TArray<UNarrativeDataAsset*> SNarrativeSpaceViewport::SelectedAssets() const
 void SNarrativeSpaceViewport::BeginRename()
 {
 	const TArray<UNarrativeDataAsset*> Assets = SelectedAssets();
-	if (RenameMenu.IsValid() || Assets.IsEmpty() || !Model->CanEdit()) { return; }
+	if (RenameMenu.IsValid() || Assets.IsEmpty() || !Model->CanManageAssets())
+	{
+		return;
+	}
+	
 	FinishInteraction(true);
 
 	// Anchor on the first selected card that is on screen, so the box opens where the eye already
@@ -909,13 +925,16 @@ void SNarrativeSpaceViewport::OnMouseCaptureLost(const FCaptureLostEvent& Event)
 
 FReply SNarrativeSpaceViewport::OnDragOver(const FGeometry& Geometry, const FDragDropEvent& Event)
 {
-	return Event.GetOperationAs<FAssetDragDropOp>().IsValid() && Model->CanEdit() ? FReply::Handled() : FReply::Unhandled();
+	return Event.GetOperationAs<FAssetDragDropOp>().IsValid() && Model->CanPlace() ? FReply::Handled() : FReply::Unhandled();
 }
 
 FReply SNarrativeSpaceViewport::OnDrop(const FGeometry& Geometry, const FDragDropEvent& Event)
 {
 	const TSharedPtr<FAssetDragDropOp> Operation = Event.GetOperationAs<FAssetDragDropOp>();
-	if (!Operation || !Model->CanEdit()) { return FReply::Unhandled(); }
+	if (!Operation || !Model->CanPlace())
+	{
+		return FReply::Unhandled();
+	}
 
 	// Only assets already plotted by this query can be dropped; the drop moves them as a group.
 	TArray<UNarrativeDataAsset*> Assets;

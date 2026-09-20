@@ -5,8 +5,11 @@
 #include "AssetViewUtils.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
+#include "Editor/EditorEngineDelegates.h"
 #include "FileHelpers.h"
 #include "Misc/PackageName.h"
+#include "NarrativeStaticData.h"
+#include "NarrativeSubsystem.h"
 #include "ObjectTools.h"
 #include "ScopedTransaction.h"
 #include "Subsystems/AssetEditorSubsystem.h"
@@ -141,6 +144,19 @@ double FNarrativeSpaceCamera::GridStep() const
 	return FMath::Pow(10.0, FMath::FloorToDouble(FMath::LogX(10.0, 90.0 / Zoom)));
 }
 
+/** The narrative simulation backing the current play session, or null when nothing is playing. */
+static UNarrativeSubsystem* PlayWorldSubsystem()
+{
+	if (!GEditor || !GEditor->IsPlaySessionInProgress())
+	{
+		return nullptr;
+	}
+	
+	const FWorldContext* Context = GEditor->GetPIEWorldContext();
+	UWorld* World = Context ? Context->World() : nullptr;
+	return IsValid(World) ? World->GetSubsystem<UNarrativeSubsystem>() : nullptr;
+}
+
 FNarrativeSpaceModel::FNarrativeSpaceModel()
 {
 	CreationRecord = NewObject<UNarrativeSpaceCreationRecord>(GetTransientPackage(), NAME_None, RF_Transactional);
@@ -151,6 +167,8 @@ FNarrativeSpaceModel::FNarrativeSpaceModel()
 	Registry.OnFilesLoaded().AddRaw(this, &FNarrativeSpaceModel::RegistryReady);
 	FCoreUObjectDelegates::OnObjectPropertyChanged.AddRaw(this, &FNarrativeSpaceModel::PropertyChanged);
 	FCoreUObjectDelegates::OnObjectsReplaced.AddRaw(this, &FNarrativeSpaceModel::ObjectsReplaced);
+	PlayStartedHandle = UE::Editor::PIE::OnPostStarted.AddRaw(this, &FNarrativeSpaceModel::PlaySessionChanged);
+	PlayEndedHandle = UE::Editor::PIE::OnEnd.AddRaw(this, &FNarrativeSpaceModel::PlaySessionChanged);
 }
 
 FNarrativeSpaceModel::~FNarrativeSpaceModel()
@@ -158,6 +176,8 @@ FNarrativeSpaceModel::~FNarrativeSpaceModel()
 	EndDrag(true);
 	FCoreUObjectDelegates::OnObjectPropertyChanged.RemoveAll(this);
 	FCoreUObjectDelegates::OnObjectsReplaced.RemoveAll(this);
+	UE::Editor::PIE::OnPostStarted.Remove(PlayStartedHandle);
+	UE::Editor::PIE::OnEnd.Remove(PlayEndedHandle);
 	if (FAssetRegistryModule* Module = FModuleManager::GetModulePtr<FAssetRegistryModule>("AssetRegistry"))
 	{
 		Module->Get().OnAssetAdded().RemoveAll(this);
@@ -182,6 +202,26 @@ bool FNarrativeSpaceModel::SetQuery(const FNarrativeSpaceQuery& InQuery)
 	Query = InQuery;
 	Refresh();
 	return bQueryValid;
+}
+
+void FNarrativeSpaceModel::SetSource(const ENarrativeSpaceSource InSource)
+{
+	if (Source == InSource)
+	{
+		return;
+	}
+	
+	// A drag authors asset values, which runtime mode does not plot. Settle it before switching.
+	EndDrag(true);
+	Source = InSource;
+	ReadPoints();
+}
+
+void FNarrativeSpaceModel::PlaySessionChanged(bool bSimulating)
+{
+	// Runtime mode has a whole different set of values behind it on either side of this, and the
+	// cards static mode draws may have just been re-seeded by something the session did.
+	bReadPending = true;
 }
 
 FStructProperty* FNarrativeSpaceModel::ResolvePlacement(UNarrativeDataAsset* Asset)
@@ -228,8 +268,16 @@ TArray<UClass*> FNarrativeSpaceModel::GetCreatableClasses()
 
 UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVector& Position)
 {
-	if (!CanEdit() || !Class || !Class->IsChildOf(UNarrativeDataAsset::StaticClass())) { return nullptr; }
-	if (!CreationRecord || GIsTransacting || GEditor->IsTransactionActive()) { return nullptr; }
+	if (!CanManageAssets() || !Class || !Class->IsChildOf(UNarrativeDataAsset::StaticClass()))
+	{
+		return nullptr;
+	}
+	
+	if (!CreationRecord || GIsTransacting || GEditor->IsTransactionActive())
+	{
+		return nullptr;
+	}
+	
 	EndDrag(true);
 
 	// The record is what actually gets transacted; see UNarrativeSpaceCreationRecord.
@@ -276,7 +324,11 @@ UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVec
 
 int32 FNarrativeSpaceModel::DeleteAssets(const TArray<UNarrativeDataAsset*>& Assets, bool bShowConfirmation)
 {
-	if (!CanEdit() || Assets.IsEmpty()) { return 0; }
+	if (!CanManageAssets() || Assets.IsEmpty())
+	{
+		return 0;
+	}
+	
 	EndDrag(true);
 
 	TArray<UObject*> Objects;
@@ -372,7 +424,7 @@ FString FNarrativeSpaceModel::RenameSeed(const TArray<UNarrativeDataAsset*>& Ass
 bool FNarrativeSpaceModel::CanRenameAssets(const TArray<UNarrativeDataAsset*>& Assets, const FString& NewName, FText& OutError) const
 {
 	OutError = FText::GetEmpty();
-	if (!CanEdit() || IsDragging() || GIsTransacting || GEditor->IsTransactionActive())
+	if (!CanManageAssets() || IsDragging() || GIsTransacting || GEditor->IsTransactionActive())
 	{
 		OutError = LOCTEXT("RenameBusy", "Renaming is not available right now.");
 		return false;
@@ -502,21 +554,65 @@ void FNarrativeSpaceModel::Refresh()
 
 void FNarrativeSpaceModel::ReadPoints()
 {
+	// Runtime mode reads simulated entities out of the play session. Nothing else in the query has
+	// a runtime counterpart, so archetypes, dialog and the rest stay at their authored coordinates
+	// and act as the fixed landmarks the moving entities are read against.
+	UNarrativeSubsystem* Runtime = Source == ENarrativeSpaceSource::Runtime ? PlayWorldSubsystem() : nullptr;
+	LiveCount = 0;
+
 	for (auto& Point : Points)
 	{
 		UNarrativeDataAsset* Asset = Point.Asset.Get();
 		FStructProperty* Property = ResolvePlacement(Asset);
-		if (!Property) { continue; }
-		const FVectorND& Value = *Property->ContainerPtrToValuePtr<FVectorND>(Asset);
+		if (!Property)
+		{
+			continue;
+		}
+
+		const FVectorND* Value = nullptr;
+		Point.bLive = false;
+		if (Runtime)
+		{
+			const UNarrativeEntityDef* EntityDef = Cast<UNarrativeEntityDef>(Asset);
+			const FNarrativeEntityInstance* Instance = EntityDef ? Runtime->FindEntity(*EntityDef) : nullptr;
+			if (Instance)
+			{
+				Value = &Instance->Position;
+				Point.bLive = true;
+				++LiveCount;
+			}
+		}
+		if (!Value)
+		{
+			Value = Property->ContainerPtrToValuePtr<FVectorND>(Asset);
+		}
+
 		Point.Position = FVector::ZeroVector;
 		Point.PresentAxes = 0;
 		for (int32 Axis = 0; Axis < Query.Axes.Num(); ++Axis)
 		{
-			Point.Position[Axis] = Value.GetCoordinate(Query.Axes[Axis]);
-			if (Value.GetBasis().Contains(Query.Axes[Axis])) { Point.PresentAxes |= 1 << Axis; }
+			Point.Position[Axis] = Value->GetCoordinate(Query.Axes[Axis]);
+			if (Value->GetBasis().Contains(Query.Axes[Axis]))
+			{
+				Point.PresentAxes |= 1 << Axis;
+			}
 		}
 		Point.Radius = FMath::IsFinite(Asset->GetSpaceRadius()) ? FMath::Max(0.f, Asset->GetSpaceRadius()) : 0.f;
 	}
+}
+
+FText FNarrativeSpaceModel::GetSourceStatus() const
+{
+	if (Source == ENarrativeSpaceSource::Static)
+	{
+		return LOCTEXT("StaticSource", "Static: authored asset values, editable during play");
+	}
+	if (!PlayWorldSubsystem())
+	{
+		return LOCTEXT("RuntimeNoPlay", "Runtime: no play session - showing authored values");
+	}
+	return FText::Format(LOCTEXT("RuntimeSource", "Runtime: {0} simulated (read only); the rest show authored values"),
+		FText::AsNumber(LiveCount));
 }
 
 void FNarrativeSpaceModel::ReadBasisAssets(IAssetRegistry& Registry)
@@ -539,12 +635,28 @@ void FNarrativeSpaceModel::ReadBasisAssets(IAssetRegistry& Registry)
 
 void FNarrativeSpaceModel::Tick()
 {
-	if (IsDragging() && !CanEdit()) { EndDrag(true); }
+	if (IsDragging() && !CanPlace()) { EndDrag(true); }
 	if (bRefreshPending && !IsDragging()) { Refresh(); }
-	else if (bReadPending && !IsDragging()) { bReadPending = false; ReadPoints(); }
+	// Runtime values move every simulation step, so they are re-read every tick rather than waiting
+	// for something to tell us they changed. Reading is cheap and never touches the details panel.
+	else if ((bReadPending || (Source == ENarrativeSpaceSource::Runtime && PlayWorldSubsystem())) && !IsDragging())
+	{
+		bReadPending = false;
+		ReadPoints();
+	}
 }
 
-bool FNarrativeSpaceModel::CanEdit() const { return bQueryValid && GEditor && !GEditor->IsPlaySessionInProgress(); }
+bool FNarrativeSpaceModel::CanEdit() const { return bQueryValid; }
+
+bool FNarrativeSpaceModel::CanPlace() const { return CanEdit() && Source == ENarrativeSpaceSource::Static; }
+
+bool FNarrativeSpaceModel::CanManageAssets() const
+{
+	// Creating, renaming and deleting move packages around underneath a session that has those
+	// assets loaded, so they stay parked until it ends. Authoring values is safe; this is not.
+	// The source makes no difference: with nothing playing, both modes show authored values.
+	return CanEdit() && GEditor && !GEditor->IsPlaySessionInProgress();
+}
 
 TArray<UObject*> FNarrativeSpaceModel::GetSelection() const
 {
@@ -578,7 +690,11 @@ FVectorND FNarrativeSpaceModel::Offset(const FVectorND& Original, const TArray<T
 
 bool FNarrativeSpaceModel::BeginDrag()
 {
-	if (!CanEdit() || IsDragging() || Selection.IsEmpty() || GIsTransacting || GEditor->IsTransactionActive()) { return false; }
+	if (!CanPlace() || IsDragging() || Selection.IsEmpty() || GIsTransacting || GEditor->IsTransactionActive())
+	{
+		return false;
+	}
+	
 	Transaction = MakeUnique<FScopedTransaction>(LOCTEXT("Move", "Move narrative assets"));
 	for (UObject* Object : GetSelection())
 	{
@@ -597,8 +713,16 @@ bool FNarrativeSpaceModel::BeginDrag()
 
 void FNarrativeSpaceModel::UpdateDrag(const FVector& Delta, int32 AxisLock, double SnapStep)
 {
-	if (!IsDragging()) { return; }
-	if (!CanEdit()) { EndDrag(true); return; }
+	if (!IsDragging())
+	{
+		return;
+	}
+	
+	if (!CanPlace())
+	{
+		EndDrag(true); return;
+	}
+	
 	for (const FDragOriginal& Original : Originals)
 	{
 		if (UNarrativeDataAsset* Asset = Original.Asset.Get())
@@ -609,7 +733,28 @@ void FNarrativeSpaceModel::UpdateDrag(const FVector& Delta, int32 AxisLock, doub
 			}
 		}
 	}
+	
+	// PostEditChangeProperty, which is what normally carries an edit into a running session, is
+	// only fired once the drag ends. Push here too so the card tracks the simulation as it moves.
+	PushDragToPlaySession();
 	ReadPoints();
+}
+
+void FNarrativeSpaceModel::PushDragToPlaySession() const
+{
+	if (!GEditor || !GEditor->IsPlaySessionInProgress()) { return; }
+	for (const FDragOriginal& Original : Originals)
+	{
+		const UNarrativeEntityDef* EntityDef = Cast<UNarrativeEntityDef>(Original.Asset.Get());
+		const FStructProperty* Property = Original.Property.Get();
+		// Only a drag of the entity's own placement field is its authored point. Plotting some
+		// other vector still edits that vector, but re-seeding from it would teleport the entity
+		// to a starting point the drag never touched.
+		if (EntityDef && Property && Property->GetFName() == EntityDef->GetSpacePlacementProperty())
+		{
+			UNarrativeSubsystem::SyncEntityFromAsset(*EntityDef);
+		}
+	}
 }
 
 void FNarrativeSpaceModel::EndDrag(bool bCancel)

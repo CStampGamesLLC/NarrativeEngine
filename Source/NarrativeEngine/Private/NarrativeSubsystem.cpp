@@ -3,6 +3,10 @@
 #include "NarrativeSubsystem.h"
 #include "GameFramework/WorldSettings.h"
 
+#if WITH_EDITOR
+#include "Engine/World.h"
+#endif
+
 static TAutoConsoleVariable<float> CVarNarrativeTelosStrength(
 	TEXT("db.Narrative.TelosStrength"),
 	0.1f,
@@ -86,6 +90,21 @@ void UNarrativeSubsystem::RegisterEntity(const UNarrativeEntityDef& InEntityDef)
 	}
 
 	Scene.Entities.Emplace(InEntityDef);
+}
+
+FNarrativeEntityInstance* UNarrativeSubsystem::FindEntity(const UNarrativeEntityDef& InEntityDef)
+{
+	// Not a set lookup: hashing the key would mean building a whole instance from the definition,
+	// which loads and rebases the entire basis. A scene holds tens of entities, so scan by name.
+	const FName EntityName = InEntityDef.GetFName();
+	for (FNarrativeEntityInstance& Entity : Scene.Entities)
+	{
+		if (Entity.Name == EntityName)
+		{
+			return &Entity;
+		}
+	}
+	return nullptr;
 }
 
 TStatId UNarrativeSubsystem::GetStatId() const
@@ -299,3 +318,67 @@ void UNarrativeSubsystem::BroadcastEntityDelta(FNarrativeEntityInstance& Entity,
 }
 #pragma endregion
 
+#pragma region Live Authoring
+#if WITH_EDITOR
+void UNarrativeSubsystem::SyncEntityFromAsset(const UNarrativeEntityDef& InEntityDef)
+{
+	if (!GEngine || !InEntityDef.StartingCoordinates.IsValid())
+	{
+		return;
+	}
+
+	for (const FWorldContext& Context : GEngine->GetWorldContexts())
+	{
+		if (Context.WorldType != EWorldType::PIE)
+		{
+			continue;
+		}
+		UWorld* World = Context.World();
+		UNarrativeSubsystem* Subsystem = IsValid(World) ? World->GetSubsystem<UNarrativeSubsystem>() : nullptr;
+		FNarrativeEntityInstance* Entity = Subsystem ? Subsystem->FindEntity(InEntityDef) : nullptr;
+		if (!Entity)
+		{
+			continue;
+		}
+
+		// Seeded the way InitEntities seeds it: the authored point, at rest, telos pointing there.
+		// Rebasing onto the live basis keeps any axis a force introduced after the session began.
+		Entity->Position = InEntityDef.StartingCoordinates.Rebased(Entity->Position.GetBasis());
+		Entity->OldPosition = Entity->Position;
+		Entity->Acceleration = FVectorND(Entity->Position.GetBasis());
+		Entity->Telos = Entity->Position;
+		Entity->LastBroadcastPosition = Entity->Position;
+		Entity->EntityDeltaBroadcastTimer = 0.f;
+		Entity->Mass = InEntityDef.Mass;
+		Entity->QueuedImpulseForces.Reset();
+
+		// Gameplay hears about the move now rather than at the next broadcast interval, which is
+		// the whole point of authoring against a running session.
+		if (FOnLocationChangeDelegate* ChangeDelegate = Subsystem->OnLocationChangeDelegates.Find(Entity->Asset.Get()))
+		{
+			ChangeDelegate->Broadcast(Entity->Position);
+		}
+	}
+}
+
+void UNarrativeEntityDef::PostEditChangeProperty(FPropertyChangedEvent& Event)
+{
+	Super::PostEditChangeProperty(Event);
+
+	// Only the authored point is pushed. Mass, drift, alignment and damping are read off the asset
+	// on every simulation step, so editing those already takes effect without help.
+	if (Event.GetMemberPropertyName() == GET_MEMBER_NAME_CHECKED(UNarrativeEntityDef, StartingCoordinates))
+	{
+		UNarrativeSubsystem::SyncEntityFromAsset(*this);
+	}
+}
+
+void UNarrativeEntityDef::PostEditUndo()
+{
+	Super::PostEditUndo();
+
+	// Undo restores the whole object at once, so there is no changed property to narrow this down.
+	UNarrativeSubsystem::SyncEntityFromAsset(*this);
+}
+#endif
+#pragma endregion

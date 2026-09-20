@@ -68,6 +68,8 @@ private:
 		double Depth = 0.0;
 		/** True only when every point in this item is missing one of the plotted axes. */
 		bool bIncomplete = false;
+		/** True when any point in this item is being read out of the running simulation. */
+		bool bLive = false;
 	};
 
 	TSharedPtr<FNarrativeSpaceModel> Model;

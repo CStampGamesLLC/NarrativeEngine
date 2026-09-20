@@ -28,6 +28,10 @@ public:
 
 #if WITH_EDITOR
 	virtual FName GetSpacePlacementProperty() const override { return GET_MEMBER_NAME_CHECKED(UNarrativeEntityDef, StartingCoordinates); }
+
+	/** Live authoring: an edit to the authored point re-seeds anything already simulating from it. */
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
+	virtual void PostEditUndo() override;
 #endif
 
 	/* How resistent this entity is to external forces */

@@ -1,13 +1,14 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+// Not just the query: the toolbar's mode toggle is declared in terms of ENarrativeSpaceSource.
+#include "NarrativeSpaceModel.h"
 #include "NarrativeSpaceQuery.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Views/SListView.h"
 
-class FNarrativeSpaceModel;
 class IDetailsView;
 class ITableRow;
 class SNarrativeSpaceViewport;
@@ -55,6 +56,15 @@ private:
 	void CreateFieldPicker();
 	void CreateAxisList();
 	TSharedRef<SWidget> CreateToolbar();
+
+	/**
+	 * The editor's own play controls, so a session can be started, paused and stopped without
+	 * leaving the tool. Same commands and same buttons the level and blueprint editors put up.
+	 */
+	static TSharedRef<SWidget> CreatePlayControls();
+
+	/** One half of the Static/Runtime pair: a toggle that reads the model's current source. */
+	TSharedRef<SWidget> CreateSourceButton(ENarrativeSpaceSource InSource, const FText& Label, const FText& Tooltip);
 
 	/** Rebuilds the axis list from the project's basis assets, plus any tagged axis they no longer hold. */
 	void RefreshAxisOptions();

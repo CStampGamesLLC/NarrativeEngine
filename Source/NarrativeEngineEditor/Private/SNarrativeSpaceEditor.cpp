@@ -5,7 +5,10 @@
 #include "PropertyEditorModule.h"
 #include "SNarrativeSpaceViewport.h"
 #include "Styling/AppStyle.h"
+#include "ToolMenus.h"
+#include "Kismet2/DebuggerCommands.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSpacer.h"
@@ -101,13 +104,16 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(8, 4)
 		[
-			SNew(STextBlock).Text_Lambda([this] { return Model->GetStatus(); })
+			SNew(STextBlock).Text_Lambda([this]
+			{
+				return FText::Format(INVTEXT("{0}  |  {1}"), Model->GetStatus(), Model->GetSourceStatus());
+			})
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(8, 4)
 		[
 			SNew(STextBlock)
 			.AutoWrapText(true)
-			.Text(LOCTEXT("Help", "Drag: move | Shift-click / marquee: select | Tab / Shift-Tab: step through entries | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB drag / MMB: pan | RMB click: menu | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | F2: rename assets | Delete: delete assets | Ctrl+Z/Y: undo/redo. Editing is disabled during PIE."))
+			.Text(LOCTEXT("Help", "Drag: move | Shift-click / marquee: select | Tab / Shift-Tab: step through entries | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB drag / MMB: pan | RMB click: menu | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | F2: rename assets | Delete: delete assets | Ctrl+Z/Y: undo/redo. Static values stay editable during play and are pushed into the running simulation; runtime positions belong to the simulation and are read only. Creating, renaming and deleting assets wait until play ends."))
 		]
 	];
 }
@@ -135,7 +141,8 @@ void SNarrativeSpaceEditor::CreateDetailViews()
 
 	DetailsArgs.NameAreaSettings = FDetailsViewArgs::ObjectsUseNameArea;
 	AssetDetails = PropertyEditor.CreateDetailView(DetailsArgs);
-	// Asset values belong to the model mid-drag, and to the PIE world during play.
+	// Asset values belong to the model mid-drag. Play does not lock them: editing one here while a
+	// session runs is the point of runtime mode.
 	AssetDetails->SetIsPropertyEditingEnabledDelegate(FIsPropertyEditingEnabled::CreateLambda(
 		[this] { return Model->CanEdit() && !Model->IsDragging(); }));
 }
@@ -276,9 +283,62 @@ void SNarrativeSpaceEditor::ToggleAxis(const TSoftObjectPtr<UNarrativeBasisVecto
 	ApplyQuery();
 }
 
+TSharedRef<SWidget> SNarrativeSpaceEditor::CreatePlayControls()
+{
+	// The commands are bound once by the level editor at startup; without them there is nothing to
+	// drive the buttons, so put up no controls rather than dead ones.
+	if (!FPlayWorldCommands::GlobalPlayWorldActions.IsValid())
+	{
+		return SNullWidget::NullWidget;
+	}
+
+	static const FName ToolbarName("NarrativeSpace.PlayToolBar");
+	if (!UToolMenus::Get()->IsMenuRegistered(ToolbarName))
+	{
+		UToolMenu* Toolbar = UToolMenus::Get()->RegisterMenu(ToolbarName, NAME_None, EMultiBoxType::SlimHorizontalToolBar);
+		FPlayWorldCommands::BuildToolbar(Toolbar->AddSection("Play"));
+	}
+	return UToolMenus::Get()->GenerateWidget(ToolbarName, FToolMenuContext(FPlayWorldCommands::GlobalPlayWorldActions));
+}
+
+TSharedRef<SWidget> SNarrativeSpaceEditor::CreateSourceButton(const ENarrativeSpaceSource InSource, const FText& Label, const FText& Tooltip)
+{
+	return SNew(SCheckBox)
+		.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+		.Padding(FMargin(10, 2))
+		.ToolTipText(Tooltip)
+		.IsChecked_Lambda([this, InSource]
+		{
+			return Model->GetSource() == InSource ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		})
+		.OnCheckStateChanged_Lambda([this, InSource](ECheckBoxState)
+		{
+			// Clicking the active half is a no-op rather than a way to leave neither selected.
+			Model->SetSource(InSource);
+		})
+		[
+			SNew(STextBlock).Text(Label)
+		];
+}
+
 TSharedRef<SWidget> SNarrativeSpaceEditor::CreateToolbar()
 {
 	const TSharedRef<SHorizontalBox> Toolbar = SNew(SHorizontalBox);
+
+	Toolbar->AddSlot().AutoWidth().VAlign(VAlign_Center)
+	[
+		CreatePlayControls()
+	];
+	Toolbar->AddSlot().AutoWidth().Padding(8, 2, 2, 2)
+	[
+		CreateSourceButton(ENarrativeSpaceSource::Static, LOCTEXT("StaticMode", "Static"),
+			LOCTEXT("StaticModeTip", "Plot and drag the values authored on the assets. Editing stays live during play: a move is pushed straight into the running simulation."))
+	];
+	Toolbar->AddSlot().AutoWidth().Padding(2)
+	[
+		CreateSourceButton(ENarrativeSpaceSource::Runtime, LOCTEXT("RuntimeMode", "Runtime"),
+			LOCTEXT("RuntimeModeTip", "Plot where the play session's entities actually are. The simulation owns those positions, so cards cannot be dragged; edit the asset in the details panel and watch it land. Assets with no simulated counterpart keep showing their authored value."))
+	];
 
 	auto AddButton = [&Toolbar](const FText& Label, const FText& Tooltip, TFunction<void()> Action)
 	{

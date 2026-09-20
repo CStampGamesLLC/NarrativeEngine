@@ -57,6 +57,24 @@ public:
 public:
 	void RegisterEntity(const UNarrativeEntityDef& InEntityDef);
 	static void ForeachEntity(UWorld* InWorld, TFunction<void(FNarrativeEntityInstance&)> Callback);
+
+	/** The live instance simulating from this definition, or null when the scene holds none. */
+	FNarrativeEntityInstance* FindEntity(const UNarrativeEntityDef& InEntityDef);
+	const FNarrativeEntityInstance* FindEntity(const UNarrativeEntityDef& InEntityDef) const
+	{
+		return const_cast<UNarrativeSubsystem*>(this)->FindEntity(InEntityDef);
+	}
+
+#if WITH_EDITOR
+	/**
+	 * Re-seeds every play world's instance of this definition from its authored coordinates, at
+	 * rest, and tells its listeners immediately. This is the editor's live authoring path: moving
+	 * a narrative space card or editing the vector while a session runs lands on the simulated
+	 * entity rather than only on the asset. Mass, drift, alignment and damping need no push - the
+	 * simulation reads those off the asset every step already.
+	 */
+	static void SyncEntityFromAsset(const UNarrativeEntityDef& InEntityDef);
+#endif
 	
 	TMap<TWeakObjectPtr<const UNarrativeEntityDef>, FOnLocationChangeDelegate> OnLocationChangeDelegates;
 	
