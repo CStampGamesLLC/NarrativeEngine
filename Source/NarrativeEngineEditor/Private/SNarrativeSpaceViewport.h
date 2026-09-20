@@ -85,7 +85,7 @@ private:
 	bool bAddSelection = false;
 	int32 AxisLock = INDEX_NONE;
 	bool bFramePending = false;
-	ENarrativeSpaceIncomplete IncompleteDisplay = ENarrativeSpaceIncomplete::Dim;
+	ENarrativeSpaceIncomplete IncompleteDisplay = ENarrativeSpaceIncomplete::Hide;
 
 	// The rename box, while one is open, and the menu holding it.
 	TSharedPtr<SEditableTextBox> RenameBox;

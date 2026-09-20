@@ -66,5 +66,5 @@ public:
 
 	/** Display only: does not change which assets the query matches, or any asset value. */
 	UPROPERTY(EditAnywhere, Category = "Narrative Space", meta = (DisplayName = "Missing An Axis"))
-	ENarrativeSpaceIncomplete Incomplete = ENarrativeSpaceIncomplete::Dim;
+	ENarrativeSpaceIncomplete Incomplete = ENarrativeSpaceIncomplete::Hide;
 };
