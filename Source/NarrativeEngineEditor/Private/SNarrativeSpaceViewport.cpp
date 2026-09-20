@@ -37,7 +37,6 @@ namespace NarrativeSpaceDraw
 	const FLinearColor MarqueeOutlineColor(0.3f, 0.6f, 1.f);
 	const FLinearColor ClassTextColor(0.5f, 0.6f, 0.7f);
 	const FLinearColor HudTextColor(0.6f, 0.7f, 0.8f);
-	const FLinearColor AxisColors[] = {FLinearColor(1.f, 0.3f, 0.25f), FLinearColor(0.3f, 0.85f, 0.4f), FLinearColor(0.3f, 0.6f, 1.f)};
 
 	/** Pointer travel, in pixels, that separates a click from a drag or a pan. */
 	constexpr double ClickThreshold = 4.0;
@@ -80,16 +79,6 @@ namespace NarrativeSpaceDraw
 		return true;
 	}
 
-	/** Display letter for a query axis index. */
-	const TCHAR* AxisLabel(const int32 Axis)
-	{
-		switch (Axis)
-		{
-		case 0:  return TEXT("X");
-		case 1:  return TEXT("Y");
-		default: return TEXT("Z");
-		}
-	}
 }
 
 void SNarrativeSpaceViewport::Construct(const FArguments& Args)
@@ -375,7 +364,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		{
 			Direction.Normalize();
 			Line({Origin - Direction * Size.Size() * 2, Origin + Direction * Size.Size() * 2},
-				AxisColors[Axis] * 0.45f, LayerId + 2);
+				NarrativeSpaceAxis::Color(Axis) * 0.45f, LayerId + 2);
 		}
 	}
 
@@ -458,7 +447,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		for (int32 Axis = 0; Axis < AxisCount; ++Axis)
 		{
 			const FVector2D Marker = Item.Screen + Item.HalfSize - FVector2D(10 + Axis * 9, 8);
-			Box(Marker, FVector2D(6), AxisColors[Axis].CopyWithNewOpacity(IncompleteFade), CardLayer + 4);
+			Box(Marker, FVector2D(6), NarrativeSpaceAxis::Color(Axis).CopyWithNewOpacity(IncompleteFade), CardLayer + 4);
 			if (!(Point.PresentAxes & (1 << Axis)))
 			{
 				Box(Marker + FVector2D(1), FVector2D(4), CardInteriorColor, CardLayer + 5);
@@ -475,7 +464,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 			FString Coordinates;
 			for (int32 Axis = 0; Axis < AxisCount; ++Axis)
 			{
-				Coordinates += FString::Printf(TEXT("%s %s  "), AxisLabel(Axis),
+				Coordinates += FString::Printf(TEXT("%s %s  "), NarrativeSpaceAxis::Label(Axis),
 					(Point.PresentAxes & (1 << Axis)) ? *FString::SanitizeFloat(Point.Position[Axis], 2) : TEXT("unset"));
 			}
 			Text(TopLeft + FVector2D(8, 36), Coordinates, Color, CardLayer + 3);
@@ -503,7 +492,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		double Exit = 0.0;
 		if (!ClipLineToRect(Origin, Direction, Size, Enter, Exit)) { continue; }
 
-		const FString Label = FString::Printf(TEXT("%s: %s"), AxisLabel(Axis), *Query.Axes[Axis].GetAssetName());
+		const FString Label = FString::Printf(TEXT("%s: %s"), NarrativeSpaceAxis::Label(Axis), *Query.Axes[Axis].GetAssetName());
 		const double Length = Label.Len() * GlyphWidth;
 		// Skip rather than spill a label out of the short end of a barely visible axis.
 		if (Exit - Enter < Length + AxisLabelMargin * 2.0) { continue; }
@@ -523,7 +512,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		FSlateDrawElement::MakeText(OutElements, NextLayer + 2,
 			Geometry.ToPaintGeometry(FVector2D(Length, 16.0), FSlateLayoutTransform(Anchor),
 				FSlateRenderTransform(FQuat2D(float(FMath::Atan2(Reading.Y, Reading.X)))), FVector2D::ZeroVector),
-			Label, Font, ESlateDrawEffect::None, AxisColors[Axis]);
+			Label, Font, ESlateDrawEffect::None, NarrativeSpaceAxis::Color(Axis));
 	}
 	if (Points.IsEmpty())
 	{
@@ -531,7 +520,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 	}
 	const FString LockLabel = AxisLock == INDEX_NONE
 		? FString(TEXT("View-plane drag"))
-		: FString::Printf(TEXT("%s locked"), AxisLabel(AxisLock));
+		: FString::Printf(TEXT("%s locked"), NarrativeSpaceAxis::Label(AxisLock));
 	Text(FVector2D(14, Size.Y - 24),
 		FString::Printf(TEXT("Grid %g | Zoom %.2f | %s"), Camera.GridStep(), Camera.Zoom, *LockLabel),
 		HudTextColor, NextLayer + 2);

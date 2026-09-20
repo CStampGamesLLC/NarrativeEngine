@@ -267,6 +267,45 @@ bool FNarrativeSpaceRenameTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceAxisPickerTest, "Narrative.Space.AxisPicker",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceAxisPickerTest::RunTest(const FString& Parameters)
+{
+	NarrativeSpaceTests::FFixture Fixture;
+	UNarrativeBasisVector* W = Fixture.Add<UNarrativeBasisVector>(TEXT("W"));
+	const TSharedRef<SNarrativeSpaceEditor> Widget = SNew(SNarrativeSpaceEditor).InitialQuery(Fixture.Query());
+	const TSharedPtr<FNarrativeSpaceModel> Model = Widget->GetModel();
+	auto Axes = [&Model] { return Model->GetQuery().Axes; };
+
+	TestTrue(TEXT("A basis asset the query does not use is still listed"), Model->GetBasisAssets().Contains(W));
+	TestTrue(TEXT("A tagged basis asset is listed too"), Model->GetBasisAssets().Contains(Fixture.X));
+	TestEqual(TEXT("The initial query tags two axes"), Axes().Num(), 2);
+
+	Widget->ToggleAxis(Fixture.Z);
+	TestEqual(TEXT("Tagging takes the next free axis"), Axes().Num(), 3);
+	TestTrue(TEXT("The third tag is Z"), Axes()[2].Get() == Fixture.Z);
+
+	Widget->ToggleAxis(W);
+	TestEqual(TEXT("A fourth basis asset cannot be tagged"), Axes().Num(), 3);
+	TestFalse(TEXT("The untagged basis asset stays out of the query"), Axes().Contains(W));
+
+	Widget->ToggleAxis(Fixture.Y);
+	TestEqual(TEXT("Untagging drops exactly one axis"), Axes().Num(), 2);
+	TestTrue(TEXT("Untagging Y leaves what was Z as the new Y"), Axes()[1].Get() == Fixture.Z);
+	TestTrue(TEXT("X keeps its tag"), Axes()[0].Get() == Fixture.X);
+
+	Widget->ToggleAxis(Fixture.Z);
+	Widget->ToggleAxis(Fixture.X);
+	TestTrue(TEXT("Untagging every axis empties the query"), Axes().IsEmpty());
+	TestFalse(TEXT("A query with no axes is invalid"), Model->IsQueryValid());
+
+	Widget->ToggleAxis(W);
+	TestEqual(TEXT("A freed query tags the next basis asset"), Axes().Num(), 1);
+	TestTrue(TEXT("The first tag is X"), Axes()[0].Get() == W);
+	TestTrue(TEXT("One axis is a valid query"), Model->IsQueryValid());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceWidgetTest, "Narrative.Space.EditorWidget",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FNarrativeSpaceWidgetTest::RunTest(const FString& Parameters)

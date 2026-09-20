@@ -1,12 +1,17 @@
 ﻿# Narrative Space editor
 
 Open **Tools > Narrative Space** (also available in the Window tools category).
-In the Query panel, add one to three `UNarrativeBasisVector` assets to **Axes**,
-in X, Y, Z order. Choose any number of narrative data asset **Classes**, or leave
-the list empty for all classes, including subclasses. **Content Path** is a
-recursive package folder such as `/Game` or `/NarrativeEngine`, not a disk path.
-Empty content path means `/Game`. Invalid/duplicate axes and invalid class/path
-entries show an explanation and disable editing instead of retaining a stale view.
+**Axes** lists every `UNarrativeBasisVector` in the project. Click one to tag it
+as the next free axis, X then Y then Z; click a tagged one to untag it. Untagging
+closes the gap it leaves, so dropping Y leaves whatever was Z as the new Y. A
+tagged entry is tinted and lettered in the colour the viewport draws that axis
+in. Three axes is the most a query can plot, so a fourth entry stays untagged
+until one is freed. In the Query panel below, choose any number of narrative data
+asset **Classes**, or leave the list empty for all classes, including subclasses.
+**Content Path** is a recursive package folder such as `/Game` or
+`/NarrativeEngine`, not a disk path. Empty content path means `/Game`. A query
+with no axes, and invalid class/path entries, show an explanation and disable
+editing instead of retaining a stale view.
 
 Click an asset to inspect/edit its properties in the right-hand Details panel.
 Assets without a valid editable `FVectorND` placement are omitted and counted in
@@ -125,7 +130,8 @@ Automation RunTests Narrative.Space
 Tests cover projection and zoom invariants, orbit, locks, reordered/sparse bases,
 hidden coordinate preservation, query validation, registry/property refresh,
 multi-asset undo/redo, cancellation, no-op dirty-state preservation, rename
-naming/validation and an in-place rename, and native widget construction.
+naming/validation and an in-place rename, axis tagging and untagging order, and
+native widget construction.
 `Narrative.Space.Render` requires a rendering RHI and writes
 `Saved/Automation/NarrativeSpace/Editor.png`; it reports a skip under NullRHI.
 Fixtures are temporary in-memory assets; these tests do not save project assets.

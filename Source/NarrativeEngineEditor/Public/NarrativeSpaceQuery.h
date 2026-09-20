@@ -22,7 +22,8 @@ struct NARRATIVEENGINEEDITOR_API FNarrativeSpaceQuery
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Space")
+	/** Tagged X, Y, Z by position. Authored through the editor's axis list, not a details panel. */
+	UPROPERTY(BlueprintReadWrite, Category = "Narrative Space")
 	TArray<TSoftObjectPtr<UNarrativeBasisVector>> Axes;
 
 	/** Empty means all narrative data asset classes. Derived classes are included. */

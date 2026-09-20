@@ -4,11 +4,15 @@
 #include "NarrativeSpaceModel.h"
 #include "PropertyEditorModule.h"
 #include "SNarrativeSpaceViewport.h"
+#include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Views/STableRow.h"
 
 #define LOCTEXT_NAMESPACE "NarrativeSpaceEditor"
 
@@ -36,6 +40,10 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 	CreateFieldPicker();
 	RefreshFieldOptions();
 
+	Model->OnBasisAssetsChanged.AddSP(this, &SNarrativeSpaceEditor::RefreshAxisOptions);
+	CreateAxisList();
+	RefreshAxisOptions();
+
 	ChildSlot
 	[
 		SNew(SVerticalBox)
@@ -49,9 +57,17 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 			+ SSplitter::Slot().Value(0.20f)
 			[
 				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight().Padding(10)
+				+ SVerticalBox::Slot().AutoHeight().Padding(10, 10, 10, 2)
 				[
-					SNew(STextBlock).Text(LOCTEXT("Query", "Query - axes in X, Y, Z order"))
+					SNew(STextBlock).Text(LOCTEXT("Axes", "Axes - click to tag X, Y, Z in order"))
+				]
+				+ SVerticalBox::Slot().FillHeight(0.45f).Padding(10, 2, 10, 8)
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					[
+						AxisList.ToSharedRef()
+					]
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(10, 2)
 				[
@@ -61,7 +77,7 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 				[
 					FieldPicker.ToSharedRef()
 				]
-				+ SVerticalBox::Slot().FillHeight(1)
+				+ SVerticalBox::Slot().FillHeight(0.55f)
 				[
 					QueryDetails.ToSharedRef()
 				]
@@ -99,6 +115,7 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 SNarrativeSpaceEditor::~SNarrativeSpaceEditor()
 {
 	Model->OnSelectionChanged.RemoveAll(this);
+	Model->OnBasisAssetsChanged.RemoveAll(this);
 	QueryDetails->OnFinishedChangingProperties().RemoveAll(this);
 	Model->EndDrag(true);
 }
@@ -140,6 +157,123 @@ void SNarrativeSpaceEditor::CreateFieldPicker()
 		[
 			SNew(STextBlock).Text_Lambda([this] { return PlacementFieldText(Settings->Query.PlacementField); })
 		];
+}
+
+void SNarrativeSpaceEditor::CreateAxisList()
+{
+	// Selection here is the query's own X/Y/Z tagging, drawn by each row, so the list keeps none of its own.
+	SAssignNew(AxisList, SListView<FAxisOption>)
+		.ListItemsSource(&AxisOptions)
+		.SelectionMode(ESelectionMode::None)
+		.OnGenerateRow(this, &SNarrativeSpaceEditor::GenerateAxisRow);
+}
+
+TSharedRef<ITableRow> SNarrativeSpaceEditor::GenerateAxisRow(FAxisOption Option, const TSharedRef<STableViewBase>& Owner)
+{
+	const TSoftObjectPtr<UNarrativeBasisVector> Axis = Option.IsValid() ? *Option : nullptr;
+	return SNew(STableRow<FAxisOption>, Owner)
+		.Padding(FMargin(2, 1))
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "NoBorder")
+			.ContentPadding(FMargin(0))
+			.IsEnabled_Lambda([this, Axis] { return AxisIndex(Axis) != INDEX_NONE || Settings->Query.Axes.Num() < 3; })
+			.ToolTipText_Lambda([this, Axis] { return AxisTooltip(Axis); })
+			.OnClicked_Lambda([this, Axis] { ToggleAxis(Axis); return FReply::Handled(); })
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor_Lambda([this, Axis]
+				{
+					// A tagged entry carries its own axis colour from the viewport, dimmed enough to
+					// read a label on. Untagged entries stay the colour of the viewport's cards.
+					const int32 Index = AxisIndex(Axis);
+					return Index == INDEX_NONE
+						? FLinearColor(0.05f, 0.06f, 0.075f)
+						: (NarrativeSpaceAxis::Color(Index) * 0.45f).CopyWithNewOpacity(1.f);
+				})
+				.Padding(FMargin(6, 3))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(SBox)
+						.WidthOverride(14.f)
+						[
+							SNew(STextBlock)
+							.Text_Lambda([this, Axis]
+							{
+								const int32 Index = AxisIndex(Axis);
+								return Index == INDEX_NONE ? FText::GetEmpty() : FText::FromString(NarrativeSpaceAxis::Label(Index));
+							})
+							.ColorAndOpacity_Lambda([this, Axis]
+							{
+								return FSlateColor(NarrativeSpaceAxis::Color(FMath::Max(0, AxisIndex(Axis))));
+							})
+						]
+					]
+					+ SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock).Text(FText::FromString(Axis.GetAssetName()))
+					]
+				]
+			]
+		];
+}
+
+FText SNarrativeSpaceEditor::AxisTooltip(const TSoftObjectPtr<UNarrativeBasisVector>& Axis) const
+{
+	const int32 Index = AxisIndex(Axis);
+	const FText Action = Index != INDEX_NONE
+		? FText::Format(LOCTEXT("AxisUntag", "Tagged {0}. Click to untag it; anything tagged after it moves up."),
+			FText::FromString(NarrativeSpaceAxis::Label(Index)))
+		: Settings->Query.Axes.Num() >= 3
+			? LOCTEXT("AxisFull", "Three axes are already tagged. Untag one to plot this basis instead.")
+			: FText::Format(LOCTEXT("AxisTag", "Click to tag as {0}."),
+				FText::FromString(NarrativeSpaceAxis::Label(Settings->Query.Axes.Num())));
+	return FText::Format(INVTEXT("{0}\n{1}"), FText::FromString(Axis.ToString()), Action);
+}
+
+void SNarrativeSpaceEditor::RefreshAxisOptions()
+{
+	AxisOptions.Reset();
+	for (const TSoftObjectPtr<UNarrativeBasisVector>& Basis : Model->GetBasisAssets())
+	{
+		AxisOptions.Add(MakeShared<TSoftObjectPtr<UNarrativeBasisVector>>(Basis));
+	}
+	// A tagged axis the project no longer holds still belongs here: this list is the only way to untag it.
+	for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : Settings->Query.Axes)
+	{
+		if (!Axis.IsNull() && !Model->GetBasisAssets().Contains(Axis))
+		{
+			AxisOptions.Add(MakeShared<TSoftObjectPtr<UNarrativeBasisVector>>(Axis));
+		}
+	}
+	AxisList->RequestListRefresh();
+}
+
+int32 SNarrativeSpaceEditor::AxisIndex(const TSoftObjectPtr<UNarrativeBasisVector>& Axis) const
+{
+	return Settings->Query.Axes.IndexOfByKey(Axis);
+}
+
+void SNarrativeSpaceEditor::ToggleAxis(const TSoftObjectPtr<UNarrativeBasisVector>& Axis)
+{
+	if (Axis.IsNull()) { return; }
+	TArray<TSoftObjectPtr<UNarrativeBasisVector>>& Axes = Settings->Query.Axes;
+	const int32 Index = AxisIndex(Axis);
+	if (Index != INDEX_NONE)
+	{
+		// Untagging closes the gap it leaves, so dropping Y leaves whatever was Z as the new Y.
+		Axes.RemoveAt(Index);
+	}
+	else
+	{
+		// Three axes is all a query can plot; a fourth entry stays untagged until one is freed.
+		if (Axes.Num() >= 3) { return; }
+		Axes.Add(Axis);
+	}
+	ApplyQuery();
 }
 
 TSharedRef<SWidget> SNarrativeSpaceEditor::CreateToolbar()
@@ -198,7 +332,11 @@ TSharedRef<SWidget> SNarrativeSpaceEditor::CreateToolbar()
 void SNarrativeSpaceEditor::QueryChanged(const FPropertyChangedEvent& Event)
 {
 	Viewport->SetIncompleteDisplay(Settings->Incomplete);
+	ApplyQuery();
+}
 
+void SNarrativeSpaceEditor::ApplyQuery()
+{
 	// Incomplete is display only, and SetQuery always reloads every matching asset. Only re-run
 	// the query when the query itself moved, so toggling the display option stays cheap.
 	const FNarrativeSpaceQuery& Current = Model->GetQuery();

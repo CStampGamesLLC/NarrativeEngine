@@ -20,7 +20,7 @@ bool FNarrativeSpaceQuery::Validate(FText& OutError) const
 {
 	if (Axes.Num() < 1 || Axes.Num() > 3)
 	{
-		OutError = LOCTEXT("AxisCount", "Choose one to three basis assets in Axes (X, Y, Z).");
+		OutError = LOCTEXT("AxisCount", "Tag one to three basis assets as axes in the Axes list.");
 		return false;
 	}
 	TSet<FSoftObjectPath> Seen;
@@ -48,6 +48,26 @@ bool FNarrativeSpaceQuery::Validate(FText& OutError) const
 	}
 	OutError = FText::GetEmpty();
 	return true;
+}
+
+const TCHAR* NarrativeSpaceAxis::Label(const int32 Axis)
+{
+	switch (Axis)
+	{
+	case 0:  return TEXT("X");
+	case 1:  return TEXT("Y");
+	default: return TEXT("Z");
+	}
+}
+
+FLinearColor NarrativeSpaceAxis::Color(const int32 Axis)
+{
+	switch (Axis)
+	{
+	case 0:  return FLinearColor(1.f, 0.3f, 0.25f);
+	case 1:  return FLinearColor(0.3f, 0.85f, 0.4f);
+	default: return FLinearColor(0.3f, 0.6f, 1.f);
+	}
 }
 
 FVector2D FNarrativeSpaceCamera::Project(const FVector& Position, const FVector2D& Size) const
@@ -421,6 +441,11 @@ void FNarrativeSpaceModel::Refresh()
 	Points.Reset();
 	PlacementFields.Reset();
 	PlacementCache.Reset();
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+	// Before the query is judged: with no axes at all the query is invalid, and the axis picker is
+	// where that gets fixed.
+	ReadBasisAssets(Registry);
+
 	bQueryValid = Query.Validate(Status);
 	int32 Skipped = 0;
 	if (bQueryValid)
@@ -432,7 +457,7 @@ void FNarrativeSpaceModel::Refresh()
 		if (Query.Classes.IsEmpty()) { Filter.ClassPaths.Add(UNarrativeDataAsset::StaticClass()->GetClassPathName()); }
 		for (const auto& Class : Query.Classes) { Filter.ClassPaths.Add(Class->GetClassPathName()); }
 		TArray<FAssetData> Assets;
-		FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().GetAssets(Filter, Assets);
+		Registry.GetAssets(Filter, Assets);
 		Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.GetSoftObjectPath().ToString() < B.GetSoftObjectPath().ToString(); });
 		TSet<UClass*> InspectedClasses;
 		for (const FAssetData& Data : Assets)
@@ -492,6 +517,24 @@ void FNarrativeSpaceModel::ReadPoints()
 		}
 		Point.Radius = FMath::IsFinite(Asset->GetSpaceRadius()) ? FMath::Max(0.f, Asset->GetSpaceRadius()) : 0.f;
 	}
+}
+
+void FNarrativeSpaceModel::ReadBasisAssets(IAssetRegistry& Registry)
+{
+	FARFilter Filter;
+	Filter.bRecursiveClasses = true;
+	Filter.ClassPaths.Add(UNarrativeBasisVector::StaticClass()->GetClassPathName());
+	TArray<FAssetData> Assets;
+	Registry.GetAssets(Filter, Assets);
+	Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.AssetName.LexicalLess(B.AssetName); });
+
+	TArray<TSoftObjectPtr<UNarrativeBasisVector>> Found;
+	Found.Reserve(Assets.Num());
+	for (const FAssetData& Data : Assets) { Found.Emplace(Data.GetSoftObjectPath()); }
+	if (Found == BasisAssets) { return; }
+
+	BasisAssets = MoveTemp(Found);
+	OnBasisAssetsChanged.Broadcast();
 }
 
 void FNarrativeSpaceModel::Tick()

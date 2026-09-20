@@ -9,9 +9,20 @@
 
 class FScopedTransaction;
 class FStructProperty;
+class IAssetRegistry;
 struct FAssetData;
 
 enum class ENarrativeSpaceView : uint8 { XY, XZ, YZ, Iso };
+
+/** How a query axis presents itself, shared by the viewport and the axis picker. */
+namespace NarrativeSpaceAxis
+{
+	/** Display letter for a query axis index: X, Y, Z in query order. */
+	const TCHAR* Label(int32 Axis);
+
+	/** The colour the viewport draws this axis in, and the picker tags its entry with. */
+	FLinearColor Color(int32 Axis);
+}
 
 /** Orthographic camera. Screen Y points down; Up points up in narrative space. */
 struct FNarrativeSpaceCamera
@@ -53,6 +64,8 @@ public:
 	void Tick();
 	const FNarrativeSpaceQuery& GetQuery() const { return Query; }
 	const TArray<FNarrativeSpacePoint>& GetPoints() const { return Points; }
+	/** Every basis asset in the project, by name, tagged as an axis or not. Drives the axis picker. */
+	const TArray<TSoftObjectPtr<UNarrativeBasisVector>>& GetBasisAssets() const { return BasisAssets; }
 	/** Union of editable vector fields on matching assets, including inherited fields and omitted assets. */
 	const TArray<FName>& GetPlacementFields() const { return PlacementFields; }
 	const FText& GetStatus() const { return Status; }
@@ -104,6 +117,8 @@ public:
 	static FString RenameSeed(const TArray<UNarrativeDataAsset*>& Assets);
 	FStructProperty* ResolvePlacement(UNarrativeDataAsset* Asset);
 	FSimpleMulticastDelegate OnSelectionChanged;
+	/** Broadcast when the project's set of basis assets changes, never for a change of axes. */
+	FSimpleMulticastDelegate OnBasisAssetsChanged;
 
 	virtual void PostUndo(bool bSuccess) override;
 	virtual void PostRedo(bool bSuccess) override { PostUndo(bSuccess); }
@@ -123,6 +138,7 @@ private:
 	};
 	FNarrativeSpaceQuery Query;
 	TArray<FNarrativeSpacePoint> Points;
+	TArray<TSoftObjectPtr<UNarrativeBasisVector>> BasisAssets;
 	TArray<FName> PlacementFields;
 	TArray<TObjectPtr<UNarrativeDataAsset>> LoadedAssets;
 	TArray<TObjectPtr<UObject>> LoadedIcons;
@@ -143,6 +159,9 @@ private:
 	bool bOwnChange = false;
 
 	void ReadPoints();
+
+	/** Re-reads the project's basis assets, broadcasting only when the set itself moved. */
+	void ReadBasisAssets(IAssetRegistry& Registry);
 
 	/** Brings created assets' registration back in line with the transacted creation record. */
 	void SyncCreatedAssets();
