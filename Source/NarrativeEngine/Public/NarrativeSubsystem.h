@@ -42,7 +42,10 @@ class NARRATIVEENGINE_API UNarrativeSubsystem : public UTickableWorldSubsystem
 	const float EntityDeltaBroadcastInterval = 0.35f;
 	/* 60hz tick interval - prevents undefined behaviors from large/small delta times */
 	const float FixedStepSize = 0.016f;
-	
+	/* Ceiling on substeps per frame. Time past it is dropped, not repaid: the sim slows under load
+	 * rather than spiralling. */
+	const int32 MaxFixedStepsPerFrame = 3;
+
 #pragma endregion
 	
 #pragma region EngineMethods

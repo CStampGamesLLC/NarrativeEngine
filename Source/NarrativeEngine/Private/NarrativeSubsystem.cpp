@@ -203,10 +203,22 @@ void UNarrativeSubsystem::SimulateEntities(float DeltaTime)
 	
 	// Tick at a steady 60hz to prevent weird jumps/artifacts from odd DT values
 	FixedStepAccumulator += DeltaTime;
-	while (FixedStepAccumulator > FixedStepSize)
+
+	const int32 StepsThisFrame = FMath::Min(
+		FMath::FloorToInt32(FixedStepAccumulator / FixedStepSize),
+		MaxFixedStepsPerFrame);
+	FixedStepAccumulator -= StepsThisFrame * FixedStepSize;
+
+	// Drop the backlog rather than carry it: otherwise a slow frame buys more substeps and the
+	// next frame is slower still.
+	const float MaxCarriedBacklog = MaxFixedStepsPerFrame * FixedStepSize;
+	if (FixedStepAccumulator > MaxCarriedBacklog)
 	{
-		FixedStepAccumulator -= FixedStepSize;
-	
+		FixedStepAccumulator = 0.f;
+	}
+
+	for (int32 Step = 0; Step < StepsThisFrame; ++Step)
+	{
 		for (FNarrativeEntityInstance& Entity : Scene.Entities)
 		{
 			// Accumulate forces
