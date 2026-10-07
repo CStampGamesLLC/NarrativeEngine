@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Serialization/StructuredArchive.h"
+#include "UObject/SoftObjectPtr.h"
 #include "NarrativeVector.generated.h"
 
 class UNarrativeBasisVector;

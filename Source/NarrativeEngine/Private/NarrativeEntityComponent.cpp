@@ -3,7 +3,10 @@
 
 #include "NarrativeEntityComponent.h"
 
+#include "NarrativeStoreSubsystem.h"
 #include "NarrativeSubsystem.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 
 // Sets default values for this component's properties
@@ -40,7 +43,77 @@ void UNarrativeEntityComponent::RegisterWithRuntime()
 
 	NarrativeSubsystem->RegisterEntity(*EntityDef);
 	NarrativeSubsystem->OnLocationChangeDelegates.FindOrAdd(EntityDef.Get()).AddUObject(this, &UNarrativeEntityComponent::HandleLocationChanged);
+
+	// The campaign entity this actor shows. Travel and streaming rebind the same id; they never make a new one.
+	FNarrativeStore* Store = UNarrativeStoreSubsystem::Find(this);
+	if (!Store)
+	{
+		return;
+	}
+
+	const FNarrativeEntityId Id = ResolveEntityId(*Store);
+	if (!Store->Views.Bind(Id, *GetOwner()))
+	{
+		UE_LOG(LogNarrativeTrace, Error, TEXT("%s shares narrative entity %s with %s: duplicate placements need their own spawn GUID. Not bound."), *GetOwner()->GetPathName(), *Id.ToString(), *GetPathNameSafe(Store->Views.FindView(Id)));
+		return;
+	}
+
+	EntityId = Id;
+	Store->Campaign.RegisterEntity(Id, *EntityDef);
 }
+
+FNarrativeEntityId UNarrativeEntityComponent::ResolveEntityId(FNarrativeStore& Store) const
+{
+	if (PersistentSpawnId.IsValid())
+	{
+		return FNarrativeEntityId(PersistentSpawnId);
+	}
+
+	const AActor* Owner = GetOwner();
+	if (IsValid(Owner) && Owner->IsNetStartupActor())
+	{
+		// Placed before spawn GUIDs existed: its level path is stable from run to run.
+		return FNarrativeEntityId::FromStablePath(UWorld::RemovePIEPrefix(Owner->GetPathName()));
+	}
+
+	return Store.Campaign.AllocateRuntimeId();
+}
+
+void UNarrativeEntityComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Only the view detaches: the entity, its mind and everything it remembers stay in the store.
+	if (EntityId.IsValid())
+	{
+		if (FNarrativeStore* Store = UNarrativeStoreSubsystem::Find(this))
+		{
+			Store->Views.Unbind(EntityId, *GetOwner());
+		}
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+#if WITH_EDITOR
+void UNarrativeEntityComponent::OnComponentCreated()
+{
+	Super::OnComponentCreated();
+
+	const AActor* Owner = GetOwner();
+	if (!PersistentSpawnId.IsValid() && Owner && !Owner->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject)
+		&& Owner->GetWorld() && Owner->GetWorld()->WorldType == EWorldType::Editor)
+	{
+		PersistentSpawnId = FGuid::NewGuid();
+	}
+}
+
+void UNarrativeEntityComponent::PostEditImport()
+{
+	Super::PostEditImport();
+
+	// A paste is a new placement.
+	PersistentSpawnId = FGuid::NewGuid();
+}
+#endif
 
 void UNarrativeEntityComponent::HandleLocationChanged(const FVectorND& NewLocation)
 {

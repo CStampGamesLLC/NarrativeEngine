@@ -1,7 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "NarrativeSubsystem.h"
-#include "GameFramework/WorldSettings.h"
+#include "NarrativeStoreSubsystem.h"
 
 #if WITH_EDITOR
 #include "Engine/World.h"
@@ -12,6 +12,13 @@ static TAutoConsoleVariable<float> CVarNarrativeTelosStrength(
 	0.1f,
 	TEXT("Strength multiplier applied to narrative Telos acceleration.\n")
 	TEXT("0 = no goal pull, 1 = default, >1 = aggressive convergence."),
+	ECVF_Default
+);
+
+static TAutoConsoleVariable<int32> CVarNarrativeDecisionBudget(
+	TEXT("db.Narrative.DecisionBudget"),
+	4000,
+	TEXT("Most stance decisions committed per frame. Work past it waits as measured lag; it is never skipped."),
 	ECVF_Default
 );
 
@@ -171,9 +178,9 @@ void UNarrativeSubsystem::CalculateAcceleration(FNarrativeEntityInstance& Entity
 			const FVectorND VParallel = TelosDir * VParallelMag;
 			const FVectorND VPerp = Velocity - VParallel;
 
-			// 1) Alignment: damp perpendicular motion (makes it "want" to move along Telos)
-			const float Align = FMath::Max(0.f, Entity.Asset->Alignment); // new param
-			ForceSum += VPerp * (-Align);
+			// 1) Rigidity: damp perpendicular motion (makes it "want" to move along Telos)
+			const float Rigidity = FMath::Max(0.f, Entity.Asset->Rigidity);
+			ForceSum += VPerp * (-Rigidity);
 
 			// 2) Drift: constant push along Telos (the "tends to drift" part)
 			const float Drift = Entity.Asset->Drift; // can be +/- to reverse
@@ -239,27 +246,38 @@ void UNarrativeSubsystem::Tick(float DeltaTime)
 	
 	Super::Tick(DeltaTime);
 
-	// The narrative sim is the world's "broad phase": it runs in real time regardless of global time
-	// dilation, so a local soft-pause (focus) slows the player's view without slowing the simulated
-	// world. Un-dilate the delta so e.g. a 0.2 dilation still advances the sim at the true rate —
-	// this is the "time injected back into the narrative simulation" the local-focus concept needs.
-	float RealDeltaTime = DeltaTime;
-	if (const UWorld* World = GetWorld())
+	// Narrative time is game time (TDD Pattern 3): slow motion and the dialog soft-pause slow minds
+	// with their bodies, and pause stops both. DeltaTime is already the world's dilated delta.
+	Scene.Tick(DeltaTime);
+
+	if (!bModelActive)
 	{
-		if (const AWorldSettings* WorldSettings = World->GetWorldSettings())
-		{
-			const float Dilation = WorldSettings->GetEffectiveTimeDilation();
-			if (Dilation > KINDA_SMALL_NUMBER)
-			{
-				RealDeltaTime = DeltaTime / Dilation;
-			}
-		}
+		SimulateEntities(DeltaTime);
+		return;
 	}
 
-	Scene.Tick(RealDeltaTime);
+	// Model presets freeze every valuation position at its authored value (TDD Pattern 24); the
+	// campaign's minds decide on the game-time clock instead.
+	if (FNarrativeStore* Store = UNarrativeStoreSubsystem::Find(this))
+	{
+		Store->Campaign.Advance(DeltaTime);
+		Store->Campaign.Pump(FMath::Max(1, CVarNarrativeDecisionBudget.GetValueOnGameThread()));
+	}
+}
 
-	// Apply gravitational forces between entities
-	SimulateEntities(RealDeltaTime);
+void UNarrativeSubsystem::SetModelActive(bool bInModelActive)
+{
+	bModelActive = bInModelActive;
+}
+
+FNarrativeStore& UNarrativeSubsystem::GetLocalStore()
+{
+	if (!LocalStore)
+	{
+		LocalStore = MakeUnique<FNarrativeStore>();
+		LocalStore->Campaign.Reset(UNarrativeStoreSubsystem::GetConfiguredSeed());
+	}
+	return *LocalStore;
 }
 
 void UNarrativeSubsystem::ForeachEntity(UWorld* InWorld, TFunction<void(FNarrativeEntityInstance&)> Callback)
@@ -373,16 +391,41 @@ void UNarrativeSubsystem::SyncEntityFromAsset(const UNarrativeEntityDef& InEntit
 	}
 }
 
+void UNarrativeSubsystem::RefreshCampaignsFromAsset(const UNarrativeEntityDef& InEntityDef)
+{
+	if (!GEngine)
+	{
+		return;
+	}
+
+	for (const FWorldContext& Context : GEngine->GetWorldContexts())
+	{
+		UWorld* World = Context.World();
+		if (Context.WorldType != EWorldType::PIE || !IsValid(World))
+		{
+			continue;
+		}
+
+		if (FNarrativeStore* Store = UNarrativeStoreSubsystem::Find(World))
+		{
+			Store->Campaign.RefreshFromTemplate(InEntityDef);
+		}
+	}
+}
+
 void UNarrativeEntityDef::PostEditChangeProperty(FPropertyChangedEvent& Event)
 {
 	Super::PostEditChangeProperty(Event);
 
-	// Only the authored point is pushed. Mass, drift, alignment and damping are read off the asset
-	// on every simulation step, so editing those already takes effect without help.
+	// Only the authored point is pushed to the legacy integrator. Mass, drift, rigidity and damping
+	// are read off the asset on every simulation step, so editing those already takes effect.
 	if (Event.GetMemberPropertyName() == GET_MEMBER_NAME_CHECKED(UNarrativeEntityDef, StartingCoordinates))
 	{
 		UNarrativeSubsystem::SyncEntityFromAsset(*this);
 	}
+
+	// Minds copy their sheet, mask, mass and position into the campaign, so every edit re-syncs them.
+	UNarrativeSubsystem::RefreshCampaignsFromAsset(*this);
 }
 
 void UNarrativeEntityDef::PostEditUndo()
@@ -391,6 +434,7 @@ void UNarrativeEntityDef::PostEditUndo()
 
 	// Undo restores the whole object at once, so there is no changed property to narrow this down.
 	UNarrativeSubsystem::SyncEntityFromAsset(*this);
+	UNarrativeSubsystem::RefreshCampaignsFromAsset(*this);
 }
 #endif
 #pragma endregion

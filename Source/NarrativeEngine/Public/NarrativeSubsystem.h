@@ -7,6 +7,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "NarrativeStaticData.h"
 #include "NarrativeRuntimeData.h"
+#include "NarrativeStoreSubsystem.h"
 #include "NarrativeSubsystem.generated.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnEntitySpawned, FNarrativeEntityInstance&)
@@ -42,8 +43,9 @@ class NARRATIVEENGINE_API UNarrativeSubsystem : public UTickableWorldSubsystem
 	const float EntityDeltaBroadcastInterval = 0.35f;
 	/* 60hz tick interval - prevents undefined behaviors from large/small delta times */
 	const float FixedStepSize = 0.016f;
-	/* Ceiling on substeps per frame. Time past it is dropped, not repaid: the sim slows under load
-	 * rather than spiralling. */
+	/* Ceiling on substeps per frame for the legacy integrator. Time past it is dropped, not repaid:
+	 * the legacy sim slows under load rather than spiralling. Minds never run on it; they run on the
+	 * campaign clock, which keeps every tick (TDD Pattern 3). */
 	const int32 MaxFixedStepsPerFrame = 3;
 
 #pragma endregion
@@ -68,15 +70,31 @@ public:
 		return const_cast<UNarrativeSubsystem*>(this)->FindEntity(InEntityDef);
 	}
 
+#pragma region Model
+	/**
+	 * While the model is active, valuation positions are frozen at their authored values and the
+	 * campaign's minds run on game time; while inactive, the legacy integrator runs and no mind
+	 * decides (TDD Patterns 2, 24). Set by the game layer when it settles on a mode.
+	 */
+	void SetModelActive(bool bInModelActive);
+	bool IsModelActive() const { return bModelActive; }
+
+	/** The store a world without a game instance reads (automation). Prefer UNarrativeStoreSubsystem::Find. */
+	FNarrativeStore& GetLocalStore();
+#pragma endregion
+
 #if WITH_EDITOR
 	/**
 	 * Re-seeds every play world's instance of this definition from its authored coordinates, at
 	 * rest, and tells its listeners immediately. This is the editor's live authoring path: moving
 	 * a narrative space card or editing the vector while a session runs lands on the simulated
-	 * entity rather than only on the asset. Mass, drift, alignment and damping need no push - the
+	 * entity rather than only on the asset. Mass, drift, rigidity and damping need no push - the
 	 * simulation reads those off the asset every step already.
 	 */
 	static void SyncEntityFromAsset(const UNarrativeEntityDef& InEntityDef);
+
+	/** Every play world's campaign takes the definition's sheet, mask, mass and position again. */
+	static void RefreshCampaignsFromAsset(const UNarrativeEntityDef& InEntityDef);
 #endif
 	
 	TMap<TWeakObjectPtr<const UNarrativeEntityDef>, FOnLocationChangeDelegate> OnLocationChangeDelegates;
@@ -132,5 +150,7 @@ public:
 #pragma region Internal State
 	FNarrativeScene Scene;
 	float FixedStepAccumulator = 0.f;
+	bool bModelActive = false;
+	TUniquePtr<FNarrativeStore> LocalStore;
 #pragma endregion
 };

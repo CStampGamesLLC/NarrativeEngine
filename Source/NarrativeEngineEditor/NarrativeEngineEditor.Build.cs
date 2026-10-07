@@ -29,7 +29,9 @@ public class NarrativeEngineEditor : ModuleRules
                 "ToolMenus",
                 "WorkspaceMenuStructure",
                 "AssetRegistry",
-                "AssetTools"
+                "AssetTools",
+                "GameplayTags",
+                "Json"
             }
         );
 
