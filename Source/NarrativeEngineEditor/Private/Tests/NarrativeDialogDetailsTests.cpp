@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "IDetailsView.h"
 #include "IDetailTreeNode.h"
 #include "Misc/AutomationTest.h"
@@ -160,6 +161,22 @@ bool FNarrativeDialogDetailsViewTest::RunTest(const FString& Parameters)
 	if (!TestTrue(TEXT("An over-cap card offers Clamp"), Clamp.IsValid())) { return false; }
 	Clamp->SimulateClick();
 	TestTrue(TEXT("Clamp lowers J to the cap at its reach"), FMath::IsNearlyEqual(Card->Strength, 0.6f));
+	const int32 Steps = GEditor->Trans->GetQueueLength();
+
+	// A field losing focus while the panel rebuilds commits again: a commit that changes nothing records nothing.
+	Clamp->SimulateClick();
+	TestEqual(TEXT("A commit that changes nothing adds no undo step"), GEditor->Trans->GetQueueLength(), Steps);
+
+	// A row from before a refresh can still commit (the crash: its property handles were already destroyed).
+	// Edits go to the card itself, so the commit lands safely and undoes like any other.
+	Details->ForceRefresh();
+	Card->Strength = 5.f;
+	Clamp->SimulateClick();
+	TestTrue(TEXT("A row from before a refresh edits the card safely"), FMath::IsNearlyEqual(Card->Strength, 0.6f));
+	GEditor->UndoTransaction();
+	TestTrue(TEXT("and its edit undoes"), FMath::IsNearlyEqual(Card->Strength, 5.f));
+	Card->Strength = 0.6f;
+
 	GEditor->UndoTransaction();
 	TestTrue(TEXT("Clamp undoes as one step"), FMath::IsNearlyEqual(Card->Strength, 4.f));
 

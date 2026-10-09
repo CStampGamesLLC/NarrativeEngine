@@ -3,6 +3,7 @@
 #include "DetailCategoryBuilder.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
+#include "IPropertyUtilities.h"
 #include "NarrativeCoreData.h"
 #include "NarrativeDialogEditing.h"
 #include "NarrativeLints.h"
@@ -28,6 +29,11 @@ namespace
 	const FLinearColor WarningInk(1.f, 0.62f, 0.12f);
 	const FLinearColor ErrorInk(1.f, 0.32f, 0.26f);
 	const FLinearColor OkInk(0.35f, 0.82f, 0.45f);
+
+	const FName SigmaName = GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, SpaceSigma);
+	const FName StrengthName = GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Strength);
+	const FName LocationName = GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Location);
+	const FName MaskName = GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Mask);
 
 	FText Number(float Value)
 	{
@@ -69,11 +75,7 @@ void FNarrativeDialogDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuild
 		return;
 	}
 	Card = Cast<UNarrativeDialogDef>(Objects[0].Get());
-
-	SigmaHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, SpaceSigma));
-	StrengthHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Strength));
-	LocationHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Location));
-	MaskHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Mask));
+	PropertyUtilities = DetailBuilder.GetPropertyUtilities();
 
 	IDetailCategoryBuilder& CardCategory = DetailBuilder.EditCategory("Card", LOCTEXT("Card", "Card"), ECategoryPriority::Important);
 	CardCategory.AddProperty(DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Phrase)));
@@ -88,10 +90,28 @@ void FNarrativeDialogDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuild
 void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 {
 	IDetailCategoryBuilder& Deed = DetailBuilder.EditCategory("Deed", LOCTEXT("Deed", "Deed"), ECategoryPriority::Important);
+	const TSharedRef<IPropertyHandle> SigmaHandle = DetailBuilder.GetProperty(SigmaName);
+	const TSharedRef<IPropertyHandle> StrengthHandle = DetailBuilder.GetProperty(StrengthName);
 	DetailBuilder.HideProperty(SigmaHandle);
 	DetailBuilder.HideProperty(StrengthHandle);
 
-	auto Sigma = [this]() { return Card.IsValid() ? Card->SpaceSigma : static_cast<float>(NarrativeLints::MinReach); };
+	// Widgets may outlive this customization by a frame (a row torn down mid-commit), so they hold it weakly.
+	const TWeakPtr<FNarrativeDialogDetails> Weak = StaticCastSharedRef<FNarrativeDialogDetails>(AsShared());
+	const TWeakObjectPtr<UNarrativeDialogDef> WeakCard = Card;
+	auto SetSigma = [Weak](float Value, bool bInteractive)
+	{
+		if (const TSharedPtr<FNarrativeDialogDetails> Self = Weak.Pin()) { Self->SetFloat(SigmaName, LOCTEXT("SetReach", "Set Reach"), Value, bInteractive); }
+	};
+	auto SetStrength = [Weak](float Value, bool bInteractive)
+	{
+		if (const TSharedPtr<FNarrativeDialogDetails> Self = Weak.Pin()) { Self->SetFloat(StrengthName, LOCTEXT("SetStrength", "Set Strength"), Value, bInteractive); }
+	};
+	auto BeginDrag = [Weak](const FText& Description)
+	{
+		if (const TSharedPtr<FNarrativeDialogDetails> Self = Weak.Pin()) { Self->BeginDrag(Description); }
+	};
+
+	auto Sigma = [WeakCard]() { return WeakCard.IsValid() ? WeakCard->SpaceSigma : static_cast<float>(NarrativeLints::MinReach); };
 	auto Tier = [Sigma]() { return NarrativeLints::TierForReach(Sigma()); };
 
 	// Reach: the number, its tier, the band bar, and chips that snap to each tier's narrowest reach.
@@ -108,9 +128,9 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 			.ToolTipText(Cap.IsSet()
 				? FText::Format(LOCTEXT("ChipTip", "Snap reach to \u03C3 {0}, where {1} cards may reach J \u2264 {2}."), Number(Floor), TierName(ChipTier), Number(Cap.GetValue()))
 				: FText::Format(LOCTEXT("ChipTipLegendary", "Snap reach to \u03C3 {0}. Legendary cards have no strength cap: they canonize instead."), Number(Floor)))
-			.OnClicked_Lambda([this, Floor]()
+			.OnClicked_Lambda([SetSigma, Floor]()
 			{
-				SetFloat(SigmaHandle, Floor, false);
+				SetSigma(Floor, false);
 				return FReply::Handled();
 			})
 			[
@@ -159,10 +179,10 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 					.MinSliderValue(TOptional<float>(SNarrativeReachBar::MinSigma))
 					.MaxSliderValue(TOptional<float>(SNarrativeReachBar::MaxSigma))
 					.Value_Lambda([Sigma]() { return TOptional<float>(Sigma()); })
-					.OnBeginSliderMovement_Lambda([this]() { DragTransaction = MakeShared<FScopedTransaction>(LOCTEXT("SetReach", "Set Reach")); })
-					.OnValueChanged_Lambda([this](float Value) { if (DragTransaction) { SetFloat(SigmaHandle, Value, true); } })
-					.OnEndSliderMovement_Lambda([this](float Value) { SetFloat(SigmaHandle, Value, false); })
-					.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { if (!DragTransaction) { SetFloat(SigmaHandle, Value, false); } })
+					.OnBeginSliderMovement_Lambda([BeginDrag]() { BeginDrag(LOCTEXT("SetReach", "Set Reach")); })
+					.OnValueChanged_Lambda([SetSigma](float Value) { SetSigma(Value, true); })
+					.OnEndSliderMovement_Lambda([SetSigma](float Value) { SetSigma(Value, false); })
+					.OnValueCommitted_Lambda([SetSigma](float Value, ETextCommit::Type) { SetSigma(Value, false); })
 				]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(6.f, 0.f).VAlign(VAlign_Center)
@@ -189,14 +209,7 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 		[
 			SNew(SNarrativeReachBar)
 			.Sigma_Lambda([Sigma]() { return TOptional<float>(Sigma()); })
-			.OnReachChanged_Lambda([this](float Value, bool bInteractive)
-			{
-				if (bInteractive && !DragTransaction)
-				{
-					DragTransaction = MakeShared<FScopedTransaction>(LOCTEXT("SetReach", "Set Reach"));
-				}
-				SetFloat(SigmaHandle, Value, bInteractive);
-			})
+			.OnReachChanged_Lambda([SetSigma](float Value, bool bInteractive) { SetSigma(Value, bInteractive); })
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f)
 		[
@@ -205,7 +218,7 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 	];
 
 	// Strength: capped by the reach above; over the cap (a wider reach, an old card) shows red with a fix.
-	auto Strength = [this]() { return Card.IsValid() ? Card->Strength : 0.f; };
+	auto Strength = [WeakCard]() { return WeakCard.IsValid() ? WeakCard->Strength : 0.f; };
 	auto Cap = [Sigma]() { return StrengthCap(Sigma()); };
 	auto IsOverCap = [Strength, Cap]() { return Cap().IsSet() && Strength() > Cap().GetValue() + UE_KINDA_SMALL_NUMBER; };
 
@@ -233,10 +246,10 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 				.MinSliderValue(TOptional<float>(0.f))
 				.MaxSliderValue_Lambda([Cap]() { return TOptional<float>(Cap().Get(2.f)); })
 				.Value_Lambda([Strength]() { return TOptional<float>(Strength()); })
-				.OnBeginSliderMovement_Lambda([this]() { DragTransaction = MakeShared<FScopedTransaction>(LOCTEXT("SetStrength", "Set Strength")); })
-				.OnValueChanged_Lambda([this](float Value) { if (DragTransaction) { SetFloat(StrengthHandle, Value, true); } })
-				.OnEndSliderMovement_Lambda([this](float Value) { SetFloat(StrengthHandle, Value, false); })
-				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { if (!DragTransaction) { SetFloat(StrengthHandle, Value, false); } })
+				.OnBeginSliderMovement_Lambda([BeginDrag]() { BeginDrag(LOCTEXT("SetStrength", "Set Strength")); })
+				.OnValueChanged_Lambda([SetStrength](float Value) { SetStrength(Value, true); })
+				.OnEndSliderMovement_Lambda([SetStrength](float Value) { SetStrength(Value, false); })
+				.OnValueCommitted_Lambda([SetStrength](float Value, ETextCommit::Type) { SetStrength(Value, false); })
 			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(6.f, 0.f).VAlign(VAlign_Center)
@@ -266,11 +279,11 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 			.Visibility_Lambda([IsOverCap]() { return IsOverCap() ? EVisibility::Visible : EVisibility::Collapsed; })
 			.Text(LOCTEXT("Clamp", "Clamp"))
 			.ToolTipText(LOCTEXT("ClampTip", "Lower J to the cap at this reach."))
-			.OnClicked_Lambda([this, Cap]()
+			.OnClicked_Lambda([SetStrength, Cap]()
 			{
 				if (Cap().IsSet())
 				{
-					SetFloat(StrengthHandle, Cap().GetValue(), false);
+					SetStrength(Cap().GetValue(), false);
 				}
 				return FReply::Handled();
 			})
@@ -280,12 +293,12 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 	Deed.AddProperty(DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Stance)));
 
 	// The card's lint findings, live, so a fix shows its effect at once.
-	auto Findings = [this]()
+	auto Findings = [WeakCard]()
 	{
 		TArray<FNarrativeLintIssue> Issues;
-		if (Card.IsValid())
+		if (WeakCard.IsValid())
 		{
-			NarrativeLints::LintCard(*Card, Issues);
+			NarrativeLints::LintCard(*WeakCard, Issues);
 		}
 		return Issues;
 	};
@@ -324,6 +337,8 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 void FNarrativeDialogDetails::BuildMeaning(IDetailLayoutBuilder& DetailBuilder)
 {
 	IDetailCategoryBuilder& Meaning = DetailBuilder.EditCategory("Meaning", LOCTEXT("Meaning", "Meaning"), ECategoryPriority::Important);
+	const TWeakPtr<FNarrativeDialogDetails> Weak = StaticCastSharedRef<FNarrativeDialogDetails>(AsShared());
+	const TWeakObjectPtr<UNarrativeDialogDef> WeakCard = Card;
 
 	Meaning.AddCustomRow(LOCTEXT("MeaningSummary", "About"))
 	.WholeRowContent()
@@ -334,9 +349,9 @@ void FNarrativeDialogDetails::BuildMeaning(IDetailLayoutBuilder& DetailBuilder)
 			SNew(STextBlock)
 			.Font(IDetailLayoutBuilder::GetDetailFont())
 			.AutoWrapText(true)
-			.Text_Lambda([this]()
+			.Text_Lambda([WeakCard]()
 			{
-				const int32 Count = Card.IsValid() ? Card->Mask.Num() : 0;
+				const int32 Count = WeakCard.IsValid() ? WeakCard->Mask.Num() : 0;
 				if (Count == 0)
 				{
 					return LOCTEXT("AboutNothing", "Not about anything yet: tick an axis or type its coordinate (L13).");
@@ -347,21 +362,24 @@ void FNarrativeDialogDetails::BuildMeaning(IDetailLayoutBuilder& DetailBuilder)
 				}
 				return FText::Format(LOCTEXT("AboutCount", "About {0} {0}|plural(one=axis,other=axes). A coordinate of 0 means deliberately neutral."), Count);
 			})
-			.ColorAndOpacity_Lambda([this]()
+			.ColorAndOpacity_Lambda([WeakCard]()
 			{
-				const int32 Count = Card.IsValid() ? Card->Mask.Num() : 0;
+				const int32 Count = WeakCard.IsValid() ? WeakCard->Mask.Num() : 0;
 				return Count == 0 ? FSlateColor(ErrorInk) : Count > NarrativeLints::MaxMaskAxes ? FSlateColor(WarningInk) : FSlateColor::UseSubduedForeground();
 			})
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
 			SNew(SButton)
-			.Visibility_Lambda([this]() { return Card.IsValid() && NeedsTidy(*Card) ? EVisibility::Visible : EVisibility::Collapsed; })
+			.Visibility_Lambda([WeakCard]() { return WeakCard.IsValid() && NeedsTidy(*WeakCard) ? EVisibility::Visible : EVisibility::Collapsed; })
 			.Text(LOCTEXT("Tidy", "Tidy"))
 			.ToolTipText(LOCTEXT("TidyTip", "Drop coordinates outside the mask (the model ignores them) and type blank masked axes at 0."))
-			.OnClicked_Lambda([this]()
+			.OnClicked_Lambda([Weak]()
 			{
-				EditMeaning(LOCTEXT("TidyMeaning", "Tidy Card Meaning"), [](UNarrativeDialogDef& Def) { Tidy(Def); });
+				if (const TSharedPtr<FNarrativeDialogDetails> Self = Weak.Pin())
+				{
+					Self->EditMeaning(LOCTEXT("TidyMeaning", "Tidy Card Meaning"), false, [](UNarrativeDialogDef& Def) { Tidy(Def); });
+				}
 				return FReply::Handled();
 			})
 		]
@@ -369,7 +387,15 @@ void FNarrativeDialogDetails::BuildMeaning(IDetailLayoutBuilder& DetailBuilder)
 
 	for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : GatherAxes(*Card))
 	{
-		auto State = [this, Axis]() { return Card.IsValid() ? GetAxisState(*Card, Axis) : EAxisState::Absent; };
+		auto State = [WeakCard, Axis]() { return WeakCard.IsValid() ? GetAxisState(*WeakCard, Axis) : EAxisState::Absent; };
+		auto SetValue = [Weak, Axis](float Value, bool bInteractive)
+		{
+			if (const TSharedPtr<FNarrativeDialogDetails> Self = Weak.Pin())
+			{
+				Self->EditMeaning(LOCTEXT("SetCoordinate", "Set Card Coordinate"), bInteractive,
+					[&Axis, Value](UNarrativeDialogDef& Def) { SetCoordinate(Def, Axis, Value); });
+			}
+		};
 		const FText Label = AxisLabel(Axis);
 
 		Meaning.AddCustomRow(Label)
@@ -390,11 +416,14 @@ void FNarrativeDialogDetails::BuildMeaning(IDetailLayoutBuilder& DetailBuilder)
 					default: return ECheckBoxState::Unchecked;
 					}
 				})
-				.OnCheckStateChanged_Lambda([this, Axis](ECheckBoxState NewState)
+				.OnCheckStateChanged_Lambda([Weak, Axis](ECheckBoxState NewState)
 				{
 					const bool bAbout = NewState == ECheckBoxState::Checked;
-					EditMeaning(bAbout ? LOCTEXT("AddAxis", "Add Axis to Card") : LOCTEXT("RemoveAxis", "Remove Axis from Card"),
-						[&Axis, bAbout](UNarrativeDialogDef& Def) { SetAbout(Def, Axis, bAbout); });
+					if (const TSharedPtr<FNarrativeDialogDetails> Self = Weak.Pin())
+					{
+						Self->EditMeaning(bAbout ? LOCTEXT("AddAxis", "Add Axis to Card") : LOCTEXT("RemoveAxis", "Remove Axis from Card"), false,
+							[&Axis, bAbout](UNarrativeDialogDef& Def) { SetAbout(Def, Axis, bAbout); });
+					}
 				})
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
@@ -421,18 +450,14 @@ void FNarrativeDialogDetails::BuildMeaning(IDetailLayoutBuilder& DetailBuilder)
 					.MaxSliderValue(TOptional<float>(30.f))
 					.UndeterminedString(LOCTEXT("Untyped", "-"))
 					.ToolTipText(LOCTEXT("CoordinateTip", "Typing a coordinate makes the card about this axis."))
-					.Value_Lambda([this, Axis]() { return Card.IsValid() ? GetCoordinate(*Card, Axis) : TOptional<float>(); })
-					.OnBeginSliderMovement_Lambda([this]()
+					.Value_Lambda([WeakCard, Axis]() { return WeakCard.IsValid() ? GetCoordinate(*WeakCard, Axis) : TOptional<float>(); })
+					.OnBeginSliderMovement_Lambda([Weak]()
 					{
-						DragTransaction = MakeShared<FScopedTransaction>(LOCTEXT("SetCoordinate", "Set Card Coordinate"));
-						if (Card.IsValid()) { Card->Modify(); }
+						if (const TSharedPtr<FNarrativeDialogDetails> Self = Weak.Pin()) { Self->BeginDrag(LOCTEXT("SetCoordinate", "Set Card Coordinate")); }
 					})
-					.OnValueChanged_Lambda([this, Axis](float Value) { if (DragTransaction) { SetAxisCoordinate(Axis, Value, true); } })
-					.OnEndSliderMovement_Lambda([this, Axis](float Value) { SetAxisCoordinate(Axis, Value, false); })
-					.OnValueCommitted_Lambda([this, Axis](float Value, ETextCommit::Type)
-					{
-						if (!DragTransaction) { SetAxisCoordinate(Axis, Value, false); }
-					})
+					.OnValueChanged_Lambda([SetValue](float Value) { SetValue(Value, true); })
+					.OnEndSliderMovement_Lambda([SetValue](float Value) { SetValue(Value, false); })
+					.OnValueCommitted_Lambda([SetValue](float Value, ETextCommit::Type) { SetValue(Value, false); })
 				]
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.f).Padding(6.f, 0.f).VAlign(VAlign_Center)
@@ -454,66 +479,109 @@ void FNarrativeDialogDetails::BuildMeaning(IDetailLayoutBuilder& DetailBuilder)
 	}
 
 	// The raw fields, for anything the rows above don't cover.
-	Meaning.AddProperty(LocationHandle, EPropertyLocation::Advanced);
-	Meaning.AddProperty(MaskHandle, EPropertyLocation::Advanced);
+	Meaning.AddProperty(DetailBuilder.GetProperty(LocationName), EPropertyLocation::Advanced);
+	Meaning.AddProperty(DetailBuilder.GetProperty(MaskName), EPropertyLocation::Advanced);
 }
 
-void FNarrativeDialogDetails::SetFloat(const TSharedPtr<IPropertyHandle>& Handle, float Value, bool bInteractive)
-{
-	if (!Handle.IsValid())
-	{
-		return;
-	}
-
-	if (bInteractive)
-	{
-		Handle->SetValue(Value, EPropertyValueSetFlags::InteractiveChange);
-		return;
-	}
-
-	// Inside an open drag transaction this nests, so the whole drag is one undo step.
-	Handle->SetValue(Value);
-	DragTransaction.Reset();
-}
-
-void FNarrativeDialogDetails::EditMeaning(const FText& Description, TFunctionRef<void(UNarrativeDialogDef&)> Edit)
+void FNarrativeDialogDetails::BeginDrag(const FText& Description)
 {
 	UNarrativeDialogDef* Def = Card.Get();
-	if (!Def || !LocationHandle.IsValid() || !MaskHandle.IsValid())
+	if (!Def || DragTransaction)
 	{
 		return;
 	}
 
-	FScopedTransaction Transaction(Description);
+	// The card is captured once, before the first step, so the whole drag undoes as one.
+	DragTransaction = MakeShared<FScopedTransaction>(Description);
 	Def->Modify();
-	LocationHandle->NotifyPreChange();
-	MaskHandle->NotifyPreChange();
-	Edit(*Def);
-	LocationHandle->NotifyPostChange(EPropertyChangeType::ValueSet);
-	MaskHandle->NotifyPostChange(EPropertyChangeType::ValueSet);
 }
 
-void FNarrativeDialogDetails::SetAxisCoordinate(const TSoftObjectPtr<UNarrativeBasisVector>& Axis, float Value, bool bInteractive)
+void FNarrativeDialogDetails::EditCard(const FText& Description, TConstArrayView<FName> Properties, bool bInteractive,
+	TFunctionRef<void(UNarrativeDialogDef&)> Edit, TFunctionRef<bool(const UNarrativeDialogDef&)> HasChanged)
 {
 	UNarrativeDialogDef* Def = Card.Get();
 	if (!Def)
 	{
+		DragTransaction.Reset();
 		return;
 	}
 
 	if (bInteractive)
 	{
-		// Live while dragging; the drag's transaction captured the card before the first step. No notification,
-		// because a details refresh mid-drag would destroy the slider being dragged.
-		NarrativeDialogEditing::SetCoordinate(*Def, Axis, Value);
+		BeginDrag(Description);
+		Edit(*Def);
 		return;
 	}
 
-	EditMeaning(LOCTEXT("SetCoordinateFinal", "Set Card Coordinate"), [&Axis, Value](UNarrativeDialogDef& Edited)
 	{
-		NarrativeDialogEditing::SetCoordinate(Edited, Axis, Value);
-	});
+		// Nests into an open drag, so a drag and its final value are one undo step.
+		const bool bClosesDrag = DragTransaction.IsValid();
+		FScopedTransaction Transaction(Description);
+		Def->Modify();
+		Edit(*Def);
+
+		// A commit that changes nothing does nothing: a field losing focus while its row is torn down commits again.
+		if (!bClosesDrag && !HasChanged(*Def))
+		{
+			Transaction.Cancel();
+			return;
+		}
+
+		for (const FName Name : Properties)
+		{
+			FPropertyChangedEvent Event(FindFProperty<FProperty>(UNarrativeDialogDef::StaticClass(), Name), EPropertyChangeType::ValueSet);
+			Def->PostEditChangeProperty(Event);
+		}
+	}
 	DragTransaction.Reset();
+}
+
+void FNarrativeDialogDetails::SetFloat(FName Property, const FText& Description, float Value, bool bInteractive)
+{
+	const UNarrativeDialogDef* Def = Card.Get();
+	const FFloatProperty* Field = FindFProperty<FFloatProperty>(UNarrativeDialogDef::StaticClass(), Property);
+	if (!Def || !Field)
+	{
+		DragTransaction.Reset();
+		return;
+	}
+
+	const float Before = Field->GetPropertyValue_InContainer(Def);
+	EditCard(Description, {Property}, bInteractive,
+		[Field, Value](UNarrativeDialogDef& Edited) { Field->SetPropertyValue_InContainer(&Edited, Value); },
+		[Field, Before](const UNarrativeDialogDef& Edited) { return Field->GetPropertyValue_InContainer(&Edited) != Before; });
+}
+
+void FNarrativeDialogDetails::EditMeaning(const FText& Description, bool bInteractive, TFunctionRef<void(UNarrativeDialogDef&)> Edit)
+{
+	UNarrativeDialogDef* Def = Card.Get();
+	if (!Def)
+	{
+		DragTransaction.Reset();
+		return;
+	}
+
+	const FVectorND LocationBefore = Def->Location;
+	const FNarrativeMask MaskBefore = Def->Mask;
+	auto AxesChanged = [&LocationBefore, &MaskBefore](const UNarrativeDialogDef& Edited)
+	{
+		return Edited.Location.GetBasis() != LocationBefore.GetBasis() || Edited.Mask.Axes != MaskBefore.Axes;
+	};
+
+	EditCard(Description, {LocationName, MaskName}, bInteractive, Edit, [&LocationBefore, &AxesChanged](const UNarrativeDialogDef& Edited)
+	{
+		return AxesChanged(Edited) || Edited.Location.GetCoordinates() != LocationBefore.GetCoordinates();
+	});
+
+	// The raw rows under Advanced index the vector by position, so a new set of axes needs new rows. Coordinate
+	// edits keep the layout, and with it the focus of the field being typed in.
+	if (!bInteractive && AxesChanged(*Def))
+	{
+		if (const TSharedPtr<IPropertyUtilities> Utilities = PropertyUtilities.Pin())
+		{
+			Utilities->RequestForceRefresh();
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

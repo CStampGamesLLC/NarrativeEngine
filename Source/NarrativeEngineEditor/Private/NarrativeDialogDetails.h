@@ -5,7 +5,7 @@
 #include "UObject/SoftObjectPtr.h"
 
 class IDetailLayoutBuilder;
-class IPropertyHandle;
+class IPropertyUtilities;
 class FScopedTransaction;
 class UNarrativeBasisVector;
 class UNarrativeDialogDef;
@@ -17,6 +17,10 @@ class UNarrativeDialogDef;
  * - Meaning: one row per axis. Ticking an axis or typing its coordinate makes the card about it; unticking
  *   removes it from both Location and Mask, so the two never disagree. The raw fields stay under Advanced.
  * A multi-card selection keeps the default layout.
+ *
+ * Edits go to the card object, never through property handles: a details refresh destroys the handles, and a
+ * field losing focus while its row is torn down still commits. Handlers hold this customization weakly, and a
+ * commit that changes nothing does nothing.
  */
 class FNarrativeDialogDetails : public IDetailCustomization
 {
@@ -28,18 +32,25 @@ private:
 	void BuildDeed(IDetailLayoutBuilder& DetailBuilder);
 	void BuildMeaning(IDetailLayoutBuilder& DetailBuilder);
 
-	/** Sets σ or J through its handle; an interactive run (a drag) becomes one undo step. */
-	void SetFloat(const TSharedPtr<IPropertyHandle>& Handle, float Value, bool bInteractive);
+	/** Opens the one transaction a drag (slider or reach bar) records as. */
+	void BeginDrag(const FText& Description);
 
-	/** One undoable edit of Location and Mask together. */
-	void EditMeaning(const FText& Description, TFunctionRef<void(UNarrativeDialogDef&)> Edit);
-	void SetAxisCoordinate(const TSoftObjectPtr<UNarrativeBasisVector>& Axis, float Value, bool bInteractive);
+	/**
+	 * One undoable edit of the named properties. A drag's steps write live without notifying, because a details
+	 * refresh mid-drag would destroy the widget being dragged; the final step notifies once and closes the drag.
+	 * Outside a drag, an edit HasChanged rejects is cancelled.
+	 */
+	void EditCard(const FText& Description, TConstArrayView<FName> Properties, bool bInteractive,
+		TFunctionRef<void(UNarrativeDialogDef&)> Edit, TFunctionRef<bool(const UNarrativeDialogDef&)> HasChanged);
+
+	/** σ or J. */
+	void SetFloat(FName Property, const FText& Description, float Value, bool bInteractive);
+
+	/** Location and Mask together; rebuilds the raw rows under Advanced when the set of axes changes. */
+	void EditMeaning(const FText& Description, bool bInteractive, TFunctionRef<void(UNarrativeDialogDef&)> Edit);
 
 	TWeakObjectPtr<UNarrativeDialogDef> Card;
-	TSharedPtr<IPropertyHandle> SigmaHandle;
-	TSharedPtr<IPropertyHandle> StrengthHandle;
-	TSharedPtr<IPropertyHandle> LocationHandle;
-	TSharedPtr<IPropertyHandle> MaskHandle;
+	TWeakPtr<IPropertyUtilities> PropertyUtilities;
 
 	/** Open while a slider or the reach bar is dragged. */
 	TSharedPtr<FScopedTransaction> DragTransaction;
