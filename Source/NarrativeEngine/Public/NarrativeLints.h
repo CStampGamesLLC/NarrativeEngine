@@ -54,6 +54,9 @@ namespace NarrativeLints
 	constexpr int32 MaxMaskAxes = 3;
 
 	NARRATIVEENGINE_API ENarrativeTier TierForReach(double Sigma);
+
+	/** The narrowest reach in Tier, where its strength cap is highest. Legendary starts at MinReach. */
+	NARRATIVEENGINE_API double TierReachFloor(ENarrativeTier Tier);
 	NARRATIVEENGINE_API const TCHAR* LexToString(ENarrativeTier Tier);
 
 	/** J ≤ min(tier cap, 1.8/σ). Legendary cards are exempt (they canonize instead) and return +inf. */

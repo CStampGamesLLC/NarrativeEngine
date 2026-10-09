@@ -1,6 +1,7 @@
 ﻿#include "NarrativeEngineEditor.h"
 
 #include "HAL/IConsoleManager.h"
+#include "NarrativeDialogDetails.h"
 #include "NarrativeVectorMigrationLibrary.h"
 #include "PropertyEditorModule.h"
 #include "VectorNDCustomization.h"
@@ -35,6 +36,8 @@ void FNarrativeEngineEditorModule::StartupModule()
 	}
 	FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor").RegisterCustomPropertyTypeLayout(
 		"VectorND", FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FVectorNDCustomization::MakeInstance));
+	FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor").RegisterCustomClassLayout(
+		"NarrativeDialogDef", FOnGetDetailCustomizationInstance::CreateStatic(&FNarrativeDialogDetails::MakeInstance));
 	PreviewMigrationCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Narrative.VectorND.PreviewMigration"), TEXT("Validate legacy narrative vectors. Optional content path (default /Game). No saves."),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
@@ -63,6 +66,7 @@ void FNarrativeEngineEditorModule::ShutdownModule()
 	if (FPropertyEditorModule* PropertyEditor = FModuleManager::GetModulePtr<FPropertyEditorModule>("PropertyEditor"))
 	{
 		PropertyEditor->UnregisterCustomPropertyTypeLayout("VectorND");
+		PropertyEditor->UnregisterCustomClassLayout("NarrativeDialogDef");
 	}
 }
 

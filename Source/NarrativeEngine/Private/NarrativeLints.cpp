@@ -84,12 +84,24 @@ namespace NarrativeLints
 		}
 	}
 
+	double TierReachFloor(ENarrativeTier Tier)
+	{
+		switch (Tier)
+		{
+		case ENarrativeTier::Common: return 8.0;
+		case ENarrativeTier::Uncommon: return 5.0;
+		case ENarrativeTier::Rare: return 3.0;
+		case ENarrativeTier::Epic: return 2.0;
+		default: return MinReach;
+		}
+	}
+
 	ENarrativeTier TierForReach(double Sigma)
 	{
-		if (Sigma >= 8.0) { return ENarrativeTier::Common; }
-		if (Sigma >= 5.0) { return ENarrativeTier::Uncommon; }
-		if (Sigma >= 3.0) { return ENarrativeTier::Rare; }
-		if (Sigma >= 2.0) { return ENarrativeTier::Epic; }
+		for (const ENarrativeTier Tier : {ENarrativeTier::Common, ENarrativeTier::Uncommon, ENarrativeTier::Rare, ENarrativeTier::Epic})
+		{
+			if (Sigma >= TierReachFloor(Tier)) { return Tier; }
+		}
 		return ENarrativeTier::Legendary;
 	}
 
