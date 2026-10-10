@@ -96,6 +96,13 @@ public:
 	void RefreshFromTemplate(const UNarrativeEntityDef& Def);
 
 	const FNarrativeEntityRecord* FindEntity(const FNarrativeEntityId& Id) const { return Entities.Find(Id); }
+
+	/** An entity minds may relate to. False for unknown ids. */
+	bool IsIndividual(const FNarrativeEntityId& Id) const
+	{
+		const FNarrativeEntityRecord* Record = Entities.Find(Id);
+		return Record && Record->bIndividual;
+	}
 	const TMap<FNarrativeEntityId, FNarrativeEntityRecord>& GetEntities() const { return Entities; }
 
 	void SetFactions(const FNarrativeEntityId& Id, const TArray<FName>& Factions);

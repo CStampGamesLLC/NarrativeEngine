@@ -209,6 +209,7 @@ FNarrativeEntityRecord* FNarrativeCampaign::RegisterEntity(const FNarrativeEntit
 	Record.Position = Def.StartingCoordinates;
 	Record.Mask = Def.Mask;
 	Record.Mass = static_cast<float>(Def.Mass);
+	Record.bIndividual = Def.bIndividual;
 	if (const UArchetypeDef* Archetype = Def.ArchetypeAsset.Get())
 	{
 		Record.Archetype = FSoftObjectPath(Archetype);
@@ -273,6 +274,7 @@ void FNarrativeCampaign::RefreshFromTemplate(const UNarrativeEntityDef& Def)
 		Record.Position = Def.StartingCoordinates;
 		Record.Mask = WithoutNullAxes(Def.Mask);
 		Record.Mass = static_cast<float>(Def.Mass);
+		Record.bIndividual = Def.bIndividual;
 		Record.Archetype = Def.ArchetypeAsset ? FSoftObjectPath(Def.ArchetypeAsset.Get()) : FSoftObjectPath();
 		Record.ArchetypeLocation = Def.ArchetypeAsset ? Def.ArchetypeAsset->Location : FVectorND();
 
@@ -570,7 +572,7 @@ void FNarrativeCampaign::CommitLayer(int64 Tick, TArrayView<FNarrativeEvent> Fac
 			FNarrativeRelation* InstigatorRelation = EnsureRelation(*Mind, Fact.Instigator, Tick);
 			if (!InstigatorRelation)
 			{
-				// Refused for capacity: the unit stays unvalued for this mind, so nothing is consumed silently.
+				// Refused for capacity, or not an individual: the unit stays unvalued for this mind, so nothing is consumed silently.
 				continue;
 			}
 			Reserve(Witness, Fact.Instigator);
@@ -824,8 +826,9 @@ FNarrativeRelation* FNarrativeCampaign::EnsureRelation(FNarrativeMind& Mind, con
 		return Existing;
 	}
 
+	// Minds relate only to individuals: objects and shared kinds stay on the faction tables.
 	const FNarrativeEntityRecord* SubjectRecord = Entities.Find(Subject);
-	if (!SubjectRecord || Subject == Mind.Observer)
+	if (!SubjectRecord || Subject == Mind.Observer || !SubjectRecord->bIndividual)
 	{
 		return nullptr;
 	}
@@ -1227,12 +1230,13 @@ uint32 FNarrativeCampaign::ComputeStateHash(bool bIncludeClockDebt) const
 		FString Archetype = Record.Archetype.ToString();
 		float Mass = Record.Mass;
 		uint8 Life = static_cast<uint8>(Record.LifeState);
+		bool bIndividual = Record.bIndividual;
 		TArray<FString> Factions;
 		for (const FName& Faction : Record.Factions)
 		{
 			Factions.Add(Faction.ToString());
 		}
-		Archive << Guid << Template << Archetype << Mass << Life << Factions;
+		Archive << Guid << Template << Archetype << Mass << Life << bIndividual << Factions;
 		WriteVector(Archive, Record.Position);
 		WriteVector(Archive, Record.ArchetypeLocation);
 		WriteMask(Archive, Record.Mask);

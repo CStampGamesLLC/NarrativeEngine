@@ -73,6 +73,10 @@ struct NARRATIVEENGINE_API FNarrativeEntityRecord
 
 	UPROPERTY()
 	ENarrativeLifeState LifeState = ENarrativeLifeState::Alive;
+
+	/* Minds relate only to individuals; objects and shared kinds stay on the faction tables. From the definition. */
+	UPROPERTY()
+	bool bIndividual = true;
 };
 
 /**

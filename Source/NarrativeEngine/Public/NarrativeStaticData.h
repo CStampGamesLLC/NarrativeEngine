@@ -129,6 +129,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind")
 	FNarrativeMindSheet Mind;
 
+	/** One particular character, whom minds form relations with. Off for objects and for kinds that many
+	 *  actors share (a mob's entity asset): minds keep no relation with those, and read them from the faction tables. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind")
+	bool bIndividual = false;
+
 	/** The stereotype others meet first (§4.2; TDD Pattern 13), and the class shown in the character
 	 *  menu. Shared UArchetypeDef assets carry the location, name and icon. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Menu")
