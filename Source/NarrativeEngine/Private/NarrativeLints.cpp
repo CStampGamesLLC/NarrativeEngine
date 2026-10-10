@@ -139,7 +139,12 @@ namespace NarrativeLints
 	void LintMechanics(const UNarrativeDialogDef& Card, TArray<FNarrativeLintIssue>& OutIssues)
 	{
 		static const FString MechanicPrefix(TEXT("Dialog.Mechanic."));
-		static const FString FamilyPrefix(TEXT("Dialog.Family."));
+		// The family each mechanic's card belongs to; the two tag trees are named independently.
+		static const TMap<FString, FString> MechanicFamily = {
+			{TEXT("EndDialog"), TEXT("Dialog.Family.Depart")},
+			{TEXT("GiveItem"), TEXT("Dialog.Family.Item.Give")},
+			{TEXT("Recruit"), TEXT("Dialog.Family.Recruit")},
+		};
 		for (const FGameplayTag& Tag : Card.AbilityTags)
 		{
 			const FString TagName = Tag.ToString();
@@ -149,7 +154,15 @@ namespace NarrativeLints
 			}
 
 			const FString Mechanic = TagName.RightChop(MechanicPrefix.Len());
-			const FString Expected = FamilyPrefix + Mechanic;
+			const FString* FoundFamily = MechanicFamily.Find(Mechanic);
+			if (!FoundFamily)
+			{
+				Add(OutIssues, TEXT("L14"), ENarrativeLintSeverity::Warning, Card,
+					FString::Printf(TEXT("Runs %s, which has no family on record: add it to L14's mechanic table."), *TagName));
+				continue;
+			}
+
+			const FString& Expected = *FoundFamily;
 			if (!Card.Family.IsValid())
 			{
 				Add(OutIssues, TEXT("L14"), ENarrativeLintSeverity::Warning, Card,
