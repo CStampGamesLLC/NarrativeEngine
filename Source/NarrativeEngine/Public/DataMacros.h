@@ -48,21 +48,3 @@ operator int() const                                                            
 																																				\
 	return INDEX_NONE;																															\
 }
-
-#define REGISTER_NARRATIVE_ASSET_TYPE(T)										\
- /*2. Query for all assets of class UMyDataAsset*/								\
-	TArray<FAssetData> T##FoundAssets;											\
- /*Using GetAssetsByClass directly*/											\
-	AssetRegistryModule.Get().GetAssetsByClass(									\
-	T::StaticClass()->GetClassPathName(),										\
-	T##FoundAssets,																\
-	true /* bSearchSubClasses */												\
-);																				\
-																				\
-for (FAssetData FoundAsset : T##FoundAssets)									\
-{																				\
-	NarrativeAssetData.Add(GetTypeHash(T::StaticClass()), FoundAsset);			\
-	/* Eagerly load and pin: TSoftObjectPtr returned by TryLoad has no other   */\
-	/* owner, so we must root it here or GC will collect the asset.            */\
-	PinAsset(Cast<UNarrativeDataAsset>(FoundAsset.GetSoftObjectPath().TryLoad()));\
-}

@@ -96,7 +96,10 @@ public:
 	/** True when dragging authors asset values. Runtime values belong to the simulation, not here. */
 	bool CanPlace() const;
 
-	/** True when assets may be created, renamed or deleted. Never while a play session holds them. */
+	/** True when Make New may create assets. A play session does not stop this. */
+	bool CanCreateAssets() const;
+
+	/** True when assets may be renamed or deleted. Never while a play session holds them. */
 	bool CanManageAssets() const;
 	TArray<UObject*> GetSelection() const;
 	bool IsSelected(const UNarrativeDataAsset* Asset) const;

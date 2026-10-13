@@ -44,6 +44,18 @@ const TCHAR* LexToString(ENarrativeOrigin Origin)
 	}
 }
 
+const TCHAR* LexToString(ENarrativeBeliefSource Source)
+{
+	switch (Source)
+	{
+	case ENarrativeBeliefSource::Relation: return TEXT("relation");
+	case ENarrativeBeliefSource::RelationAndFirstImpression: return TEXT("relation + first impression");
+	case ENarrativeBeliefSource::FirstImpression: return TEXT("first impression");
+	case ENarrativeBeliefSource::Self: return TEXT("self");
+	default: return TEXT("?");
+	}
+}
+
 namespace
 {
 	/* Canonical order: (layer, producer, sequence). */
@@ -1128,6 +1140,84 @@ const FNarrativeRelation* FNarrativeCampaign::FindRelation(const FNarrativeEntit
 {
 	const FNarrativeMind* Mind = Minds.Find(Observer);
 	return Mind ? Mind->Relations.Find(Subject) : nullptr;
+}
+
+bool FNarrativeCampaign::ReadBelief(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject, const FNarrativeMask& Axes,
+	TArray<double>& OutMean, TArray<double>& OutVariance, ENarrativeBeliefSource* OutSource) const
+{
+	OutMean.Reset();
+	OutVariance.Reset();
+	const FNarrativeEntityRecord* Self = Entities.Find(Observer);
+	const FNarrativeEntityRecord* SubjectRecord = Entities.Find(Subject);
+	if (!Self || !SubjectRecord)
+	{
+		return false;
+	}
+
+	if (Observer == Subject)
+	{
+		Axes.Gather(Self->Position, OutMean);
+		OutVariance.SetNumZeroed(OutMean.Num());
+		if (OutSource)
+		{
+			*OutSource = ENarrativeBeliefSource::Self;
+		}
+		return true;
+	}
+
+	// The first impression EnsureRelation would form, read without caching the archetype belief:
+	// the believer's idea of the subject's archetype, leaning toward itself by π (§4.2).
+	const FNarrativeMind* Mind = Minds.Find(Observer);
+	const FNarrativeMindSheet Sheet = Mind ? Mind->Sheet : FNarrativeMindSheet();
+	const FVectorND* Stereotype = nullptr;
+	if (SubjectRecord->Archetype.IsValid())
+	{
+		Stereotype = Mind ? Mind->ArchetypeBeliefs.Find(SubjectRecord->Archetype) : nullptr;
+		if (!Stereotype)
+		{
+			Stereotype = Sheet.WorldviewOverrides.Find(TSoftObjectPtr<UArchetypeDef>(SubjectRecord->Archetype));
+		}
+		if (!Stereotype)
+		{
+			Stereotype = &SubjectRecord->ArchetypeLocation;
+		}
+	}
+
+	TArray<double> SelfOnAxes;
+	TArray<double> StereotypeOnAxes;
+	Axes.Gather(Self->Position, SelfOnAxes);
+	if (Stereotype)
+	{
+		Axes.Gather(*Stereotype, StereotypeOnAxes);
+	}
+	OutMean.SetNumZeroed(Axes.Num());
+	const TConstArrayView<double> StereotypeView(StereotypeOnAxes);
+	NarrativeMath::FirstImpressionMean(SelfOnAxes, Stereotype ? &StereotypeView : nullptr, Sheet.PriorSelfWeight, OutMean);
+	OutVariance.Init(FMath::Square(static_cast<double>(Sheet.PriorSpread)), Axes.Num());
+
+	// What the relation holds overrides it, axis by axis.
+	const FNarrativeRelation* Relation = Mind ? Mind->Relations.Find(Subject) : nullptr;
+	int32 Held = 0;
+	if (Relation)
+	{
+		for (int32 Index = 0; Index < Axes.Num(); ++Index)
+		{
+			const TSoftObjectPtr<UNarrativeBasisVector>& Axis = Axes.Axes[Index];
+			if (Relation->Mean.GetBasis().Contains(Axis))
+			{
+				OutMean[Index] = Relation->Mean.GetCoordinate(Axis);
+				OutVariance[Index] = FMath::Max(0.0, static_cast<double>(Relation->Variance.GetCoordinate(Axis)));
+				++Held;
+			}
+		}
+	}
+
+	if (OutSource)
+	{
+		*OutSource = !Relation ? ENarrativeBeliefSource::FirstImpression
+			: (Held == Axes.Num() ? ENarrativeBeliefSource::Relation : ENarrativeBeliefSource::RelationAndFirstImpression);
+	}
+	return true;
 }
 
 double FNarrativeCampaign::GetRegardAtFrontier(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject) const

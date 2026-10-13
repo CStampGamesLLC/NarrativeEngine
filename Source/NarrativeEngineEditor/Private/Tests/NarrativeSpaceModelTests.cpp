@@ -12,6 +12,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "NarrativeCoreData.h"
 #include "NarrativeStaticData.h"
 #include "SNarrativeSpaceEditor.h"
 #include "SNarrativeSpaceViewport.h"
@@ -263,6 +264,75 @@ bool FNarrativeSpaceRenameTest::RunTest(const FString& Parameters)
 	if (FPackageName::TryConvertLongPackageNameToFilename(Fixture.Root, FolderOnDisk))
 	{
 		IFileManager::Get().DeleteDirectory(*FolderOnDisk, false, true);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceMakeNewTest, "Narrative.Space.MakeNew",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceMakeNewTest::RunTest(const FString& Parameters)
+{
+	NarrativeSpaceTests::FFixture Fixture;
+	FNarrativeSpaceModel Model;
+	Model.SetQuery(Fixture.Query());
+
+	const TArray<UClass*> Classes = Model.GetCreatableClasses();
+	TestTrue(TEXT("Dialog is creatable"), Classes.Contains(UNarrativeDialogDef::StaticClass()));
+	TestTrue(TEXT("Entity is creatable"), Classes.Contains(UNarrativeEntityDef::StaticClass()));
+
+	UNarrativeDataAsset* Created = Model.CreateAsset(UNarrativeDialogDef::StaticClass(), FVector(3, 4, 0));
+	if (!TestNotNull(TEXT("Make New creates an asset"), Created)) { return false; }
+	TestEqual(TEXT("Created under the query's content path"), FPackageName::GetLongPackagePath(Created->GetPackage()->GetName()), Fixture.Root);
+	TestTrue(TEXT("Created asset is selected"), Model.IsSelected(Created));
+	auto Plotted = [&Model, Created]() -> const FNarrativeSpacePoint*
+	{
+		return Model.GetPoints().FindByPredicate([Created](const FNarrativeSpacePoint& Point) { return Point.Asset == Created; });
+	};
+	if (const FNarrativeSpacePoint* Point = Plotted())
+	{
+		TestTrue(TEXT("Created asset is plotted where it was made"), Point->Position.Equals(FVector(3, 4, 0)));
+		TestEqual(TEXT("Created asset has every plotted axis"), Point->PresentAxes, uint8(0b11));
+	}
+	else { AddError(TEXT("Created asset is plotted")); }
+	const FNarrativeMask& DialogMask = CastChecked<UNarrativeDialogDef>(Created)->Mask;
+	TestEqual(TEXT("Created dialog is masked to the plotted axes"), DialogMask.Num(), 2);
+	TestTrue(TEXT("Dialog mask holds X"), DialogMask.Contains(Fixture.X));
+	TestTrue(TEXT("Dialog mask holds Y"), DialogMask.Contains(Fixture.Y));
+
+	Model.Tick();
+	TestNotNull(TEXT("Created asset survives the registry's own refresh"), Plotted());
+	TestTrue(TEXT("Created asset stays selected"), Model.IsSelected(Created));
+
+	// What the dealer iterates, so a card made during play is dealt without a restart.
+	auto Dealable = [Created]
+	{
+		return UNarrativeDialogDef::GetLoadedAssets().ContainsByPredicate(
+			[Created](const TSoftObjectPtr<UNarrativeDialogDef>& Card) { return Card.Get() == Created; });
+	};
+	TestTrue(TEXT("The runtime catalog deals the created card"), Dealable());
+
+	GEditor->UndoTransaction(); Model.Tick();
+	TestNull(TEXT("Undo removes the created asset"), Plotted());
+	TestFalse(TEXT("Undo takes the card out of the runtime catalog"), Dealable());
+	GEditor->RedoTransaction(); Model.Tick();
+	TestNotNull(TEXT("Redo restores the created asset"), Plotted());
+	TestTrue(TEXT("Redo puts the card back in the runtime catalog"), Dealable());
+
+	UNarrativeDataAsset* CreatedEntity = Model.CreateAsset(UNarrativeEntityDef::StaticClass(), FVector(1, 2, 0));
+	if (TestNotNull(TEXT("Make New creates an entity"), CreatedEntity))
+	{
+		const FNarrativeMask& EntityMask = CastChecked<UNarrativeEntityDef>(CreatedEntity)->Mask;
+		TestEqual(TEXT("Created entity is masked to the plotted axes"), EntityMask.Num(), 2);
+		TestTrue(TEXT("Entity mask holds X and Y"), EntityMask.Contains(Fixture.X) && EntityMask.Contains(Fixture.Y));
+	}
+
+	for (UNarrativeDataAsset* Asset : {Created, CreatedEntity})
+	{
+		if (!Asset) { continue; }
+		if (UNarrativeDataSubsystem* Catalog = GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>()) { Catalog->UnregisterAsset(Asset); }
+		FAssetRegistryModule::AssetDeleted(Asset);
+		Asset->ClearFlags(RF_Public | RF_Standalone);
+		Asset->GetPackage()->SetDirtyFlag(false);
 	}
 	return true;
 }

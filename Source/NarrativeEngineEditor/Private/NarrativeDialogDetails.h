@@ -38,7 +38,8 @@ private:
 	/**
 	 * One undoable edit of the named properties. A drag's steps write live without notifying, because a details
 	 * refresh mid-drag would destroy the widget being dragged; the final step notifies once and closes the drag.
-	 * Outside a drag, an edit HasChanged rejects is cancelled.
+	 * Only BeginDrag opens a drag: an interactive step with none open is an edit of its own. Outside a drag, an
+	 * edit HasChanged rejects is cancelled.
 	 */
 	void EditCard(const FText& Description, TConstArrayView<FName> Properties, bool bInteractive,
 		TFunctionRef<void(UNarrativeDialogDef&)> Edit, TFunctionRef<bool(const UNarrativeDialogDef&)> HasChanged);

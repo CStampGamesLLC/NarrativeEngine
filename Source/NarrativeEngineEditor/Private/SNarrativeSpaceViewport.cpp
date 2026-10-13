@@ -647,7 +647,7 @@ void SNarrativeSpaceViewport::ShowContextMenu(const FVector2D& At, const FVector
 	MenuBuilder.BeginSection(TEXT("NarrativeSpaceCreate"), LOCTEXT("CreateSection", "Narrative Space"));
 	MenuBuilder.AddSubMenu(
 		LOCTEXT("MakeNew", "Make New"),
-		LOCTEXT("MakeNewTip", "Create a narrative data asset at this point, in the query's content path. The new asset is left unsaved."),
+		LOCTEXT("MakeNewTip", "Create a narrative data asset at this point, in the query's content path. The new asset is left unsaved. Works during play: a running session deals a new dialog card straight away."),
 		FNewMenuDelegate::CreateSP(this, &SNarrativeSpaceViewport::BuildMakeNewMenu, At));
 	const int32 SelectionCount = Model->GetSelection().Num();
 	MenuBuilder.AddMenuEntry(
@@ -694,7 +694,7 @@ void SNarrativeSpaceViewport::BuildMakeNewMenu(FMenuBuilder& Builder, FVector2D 
 			FSlateIcon(),
 			FUIAction(
 				FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::CreateAssetAt, TWeakObjectPtr<UClass>(Class), At),
-				FCanExecuteAction::CreateSP(Model.ToSharedRef(), &FNarrativeSpaceModel::CanManageAssets)));
+				FCanExecuteAction::CreateSP(Model.ToSharedRef(), &FNarrativeSpaceModel::CanCreateAssets)));
 	}
 }
 

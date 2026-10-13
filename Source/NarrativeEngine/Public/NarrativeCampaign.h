@@ -15,6 +15,21 @@ DECLARE_MULTICAST_DELEGATE_FiveParams(FOnNarrativeStanceDecided, const FNarrativ
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnNarrativeTell, const FNarrativeEntityId& /*Observer*/, const FNarrativeEntityId& /*Subject*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnNarrativeEventCommitted, const FNarrativeEvent&);
 
+/** Where FNarrativeCampaign::ReadBelief's answer came from. */
+enum class ENarrativeBeliefSource : uint8
+{
+	/** Every axis from the relation. */
+	Relation,
+	/** The relation, with the axes it doesn't hold read as the first impression. */
+	RelationAndFirstImpression,
+	/** No relation yet: the first impression a meeting would form. */
+	FirstImpression,
+	/** Observer and subject are one: its own position. */
+	Self,
+};
+
+NARRATIVEENGINE_API const TCHAR* LexToString(ENarrativeBeliefSource Source);
+
 /** What a campaign is, so saves and telemetry can name it (TDD §6 CampaignHeader). */
 struct NARRATIVEENGINE_API FNarrativeCampaignHeader
 {
@@ -155,6 +170,15 @@ public:
 
 	/** R decayed to the frontier. */
 	double GetRegardAtFrontier(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject) const;
+
+	/**
+	 * What Observer believes of Subject on Axes, in Axes order, for choosing what to say (TDD Pattern
+	 * 10): the relation's μ and diag Σ where it holds the axis, else the first impression a meeting
+	 * would form (§4.2). Never the subject's true position, and nothing is created or drawn. Talking
+	 * to oneself reads one's own position, exactly. False when either entity is unknown.
+	 */
+	bool ReadBelief(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject, const FNarrativeMask& Axes,
+		TArray<double>& OutMean, TArray<double>& OutVariance, ENarrativeBeliefSource* OutSource = nullptr) const;
 
 	/**
 	 * Over every authoritative record in canonical order (TDD §7): header and counters, the frontier,

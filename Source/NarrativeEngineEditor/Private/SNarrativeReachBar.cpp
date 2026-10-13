@@ -116,6 +116,23 @@ FReply SNarrativeReachBar::OnMouseButtonUp(const FGeometry& MyGeometry, const FP
 	return FReply::Handled().ReleaseMouseCapture();
 }
 
+void SNarrativeReachBar::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	if (!bDragging)
+	{
+		return;
+	}
+	bDragging = false;
+
+	// A drag cut short (a window stealing capture) still has to close, or its transaction stays open. Keep the
+	// value it reached.
+	const TOptional<float> Current = Sigma.Get();
+	if (Current.IsSet())
+	{
+		OnReachChanged.ExecuteIfBound(Current.GetValue(), false);
+	}
+}
+
 FCursorReply SNarrativeReachBar::OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const
 {
 	return FCursorReply::Cursor(EMouseCursor::ResizeLeftRight);

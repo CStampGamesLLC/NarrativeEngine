@@ -8,6 +8,7 @@
 #include "Editor/EditorEngineDelegates.h"
 #include "FileHelpers.h"
 #include "Misc/PackageName.h"
+#include "NarrativeCoreData.h"
 #include "NarrativeStaticData.h"
 #include "NarrativeSubsystem.h"
 #include "ObjectTools.h"
@@ -18,6 +19,8 @@
 #include "UObject/UnrealType.h"
 
 #define LOCTEXT_NAMESPACE "NarrativeSpace"
+
+DEFINE_LOG_CATEGORY_STATIC(LogNarrativeSpace, Log, All);
 
 bool FNarrativeSpaceQuery::Validate(FText& OutError) const
 {
@@ -157,6 +160,12 @@ static UNarrativeSubsystem* PlayWorldSubsystem()
 	return IsValid(World) ? World->GetSubsystem<UNarrativeSubsystem>() : nullptr;
 }
 
+/** The runtime's catalog of narrative assets: what deals dialog cards and resolves assets by name, in play too. */
+static UNarrativeDataSubsystem* DataCatalog()
+{
+	return GEngine ? GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>() : nullptr;
+}
+
 FNarrativeSpaceModel::FNarrativeSpaceModel()
 {
 	CreationRecord = NewObject<UNarrativeSpaceCreationRecord>(GetTransientPackage(), NAME_None, RF_Transactional);
@@ -268,13 +277,15 @@ TArray<UClass*> FNarrativeSpaceModel::GetCreatableClasses()
 
 UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVector& Position)
 {
-	if (!CanManageAssets() || !Class || !Class->IsChildOf(UNarrativeDataAsset::StaticClass()))
+	if (!CanCreateAssets() || !Class || !Class->IsChildOf(UNarrativeDataAsset::StaticClass()))
 	{
 		return nullptr;
 	}
 	
 	if (!CreationRecord || GIsTransacting || GEditor->IsTransactionActive())
 	{
+		// Nesting would fold the create into someone else's undo step. Say so, or Make New just looks dead.
+		UE_LOG(LogNarrativeSpace, Warning, TEXT("Make New skipped: another editor transaction is still open."));
 		return nullptr;
 	}
 	
@@ -308,9 +319,19 @@ UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVec
 			Vector.SetCoordinate(Query.Axes[Axis], float(Position[Axis]));
 		}
 	}
+	// Placed on these axes means about them: typed coordinates outside the mask would be ignored (§2).
+	const FName MaskField = Asset->GetSpaceMaskProperty();
+	FStructProperty* MaskProperty = MaskField.IsNone() ? nullptr : FindFProperty<FStructProperty>(Asset->GetClass(), MaskField);
+	if (MaskProperty && MaskProperty->Struct == FNarrativeMask::StaticStruct() && MaskProperty->ArrayDim == 1)
+	{
+		FNarrativeMask& Mask = *MaskProperty->ContainerPtrToValuePtr<FNarrativeMask>(Asset);
+		for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : Query.Axes) { Mask.Add(Axis); }
+	}
 
 	FAssetRegistryModule::AssetCreated(Asset);
 	Package->MarkPackageDirty();
+	// The catalog only scans at startup. Filing the asset here is what lets a running session deal it.
+	if (UNarrativeDataSubsystem* Catalog = DataCatalog()) { Catalog->RegisterAsset(Asset); }
 
 	// The new package stays dirty until an explicit save, undone or not.
 	CreationRecord->Created.Add(Asset);
@@ -345,9 +366,11 @@ int32 FNarrativeSpaceModel::DeleteAssets(const TArray<UNarrativeDataAsset*>& Ass
 		bool bTracked = false;
 		bool bRecorded = false;
 		bool bLive = false;
+		bool bCataloged = false;
 	};
 	TArray<FDoomed> Doomed;
 	Doomed.Reserve(Objects.Num());
+	UNarrativeDataSubsystem* Catalog = DataCatalog();
 	for (UObject* Object : Objects)
 	{
 		UNarrativeDataAsset* Asset = CastChecked<UNarrativeDataAsset>(Object);
@@ -360,6 +383,8 @@ int32 FNarrativeSpaceModel::DeleteAssets(const TArray<UNarrativeDataAsset*>& Ass
 		Entry.bLive = LiveCreated.Remove(Entry.Asset) > 0;
 		Selection.Remove(Entry.Asset);
 		LoadedAssets.Remove(Asset);
+		// The catalog's pin is a strong reference too, and a deleted asset must stop being dealt.
+		Entry.bCataloged = Catalog && Catalog->UnregisterAsset(Asset);
 	}
 
 	// ObjectTools runs the editor's own confirmation and reference check. This is not undoable.
@@ -375,6 +400,7 @@ int32 FNarrativeSpaceModel::DeleteAssets(const TArray<UNarrativeDataAsset*>& Ass
 		if (Entry.bTracked) { CreatedAssets.Add(Asset); }
 		if (Entry.bRecorded && CreationRecord) { CreationRecord->Created.Add(Asset); }
 		if (Entry.bLive) { LiveCreated.Add(Entry.Asset); }
+		if (Entry.bCataloged) { Catalog->RegisterAsset(Asset); }
 	}
 
 	Refresh();
@@ -476,9 +502,22 @@ int32 FNarrativeSpaceModel::RenameAssets(const TArray<UNarrativeDataAsset*>& Ass
 	}
 	if (Renames.IsEmpty()) { return 0; }
 
+	// The catalog files assets by path, so take them out under the old one and back in under the new.
+	UNarrativeDataSubsystem* Catalog = DataCatalog();
+	TArray<TWeakObjectPtr<UNarrativeDataAsset>> Moving;
+	for (const FAssetRenameData& Rename : Renames)
+	{
+		UNarrativeDataAsset* Asset = Cast<UNarrativeDataAsset>(Rename.Asset.Get());
+		if (Catalog && Catalog->UnregisterAsset(Asset)) { Moving.Add(Asset); }
+	}
+
 	// AssetTools carries references, redirectors and source control across, and puts up its own
 	// dialog for anything it cannot rename. Like a Content Browser rename, this is not undoable.
 	const bool bRenamed = AssetTools.RenameAssetsWithDialog(Renames) == EAssetRenameResult::Success;
+	for (const TWeakObjectPtr<UNarrativeDataAsset>& Asset : Moving)
+	{
+		if (Asset.IsValid()) { Catalog->RegisterAsset(Asset.Get()); }
+	}
 	bRefreshPending = true;
 	return bRenamed ? Renames.Num() : 0;
 }
@@ -650,10 +689,18 @@ bool FNarrativeSpaceModel::CanEdit() const { return bQueryValid; }
 
 bool FNarrativeSpaceModel::CanPlace() const { return CanEdit() && Source == ENarrativeSpaceSource::Static; }
 
+bool FNarrativeSpaceModel::CanCreateAssets() const
+{
+	// A new package is one nothing in a play session has loaded, so creating is safe mid-session,
+	// and the catalog hands the new asset to the session straight away. The source makes no
+	// difference: either mode plots in the same space the new asset is placed in.
+	return CanEdit() && GEditor != nullptr;
+}
+
 bool FNarrativeSpaceModel::CanManageAssets() const
 {
-	// Creating, renaming and deleting move packages around underneath a session that has those
-	// assets loaded, so they stay parked until it ends. Authoring values is safe; this is not.
+	// Renaming and deleting move packages around underneath a session that has those assets
+	// loaded, so they stay parked until it ends. Authoring values and creating are safe; this is not.
 	// The source makes no difference: with nothing playing, both modes show authored values.
 	return CanEdit() && GEditor && !GEditor->IsPlaySessionInProgress();
 }
@@ -810,24 +857,40 @@ void FNarrativeSpaceModel::PostUndo(bool bSuccess)
 void FNarrativeSpaceModel::SyncCreatedAssets()
 {
 	if (!CreationRecord) { return; }
+	UNarrativeDataSubsystem* Catalog = DataCatalog();
 	for (const TObjectPtr<UNarrativeDataAsset>& Created : CreatedAssets)
 	{
 		UNarrativeDataAsset* Asset = Created.Get();
 		// A destructive delete can retire an asset that undo would otherwise try to resurrect.
-		if (!Asset || !IsValid(Asset)) { continue; }
+		if (!Asset || !IsValid(Asset))
+		{
+			continue;
+		}
 
 		const bool bShouldBeLive = CreationRecord->Created.Contains(Asset);
-		if (bShouldBeLive == LiveCreated.Contains(Asset)) { continue; }
+		if (bShouldBeLive == LiveCreated.Contains(Asset))
+		{
+			continue;
+		}
 		if (bShouldBeLive)
 		{
 			Asset->SetFlags(RF_Public | RF_Standalone);
 			FAssetRegistryModule::AssetCreated(Asset);
 			Asset->GetPackage()->MarkPackageDirty();
+			if (Catalog)
+			{
+				Catalog->RegisterAsset(Asset);
+			}
 			LiveCreated.Add(Asset);
 		}
 		else
 		{
 			// The asset is unsaved either way, so dropping it from the registry undoes the create.
+			// It stays in memory for redo, so the catalog has to forget it or a session still deals it.
+			if (Catalog)
+			{
+				Catalog->UnregisterAsset(Asset);
+			}
 			FAssetRegistryModule::AssetDeleted(Asset);
 			Asset->ClearFlags(RF_Public | RF_Standalone);
 			Asset->GetPackage()->SetDirtyFlag(false);
@@ -842,8 +905,14 @@ void FNarrativeSpaceModel::PropertyChanged(UObject* Object, FPropertyChangedEven
 	// full refresh rebuilds the details tree out from under the cursor, ending the drag. Re-read
 	// the plotted positions instead so the viewport tracks the drag live; the ValueSet that closes
 	// the interaction still refreshes.
-	if ((Event.ChangeType & EPropertyChangeType::Interactive) != 0) { bReadPending = true; }
-	else { bRefreshPending = true; }
+	if ((Event.ChangeType & EPropertyChangeType::Interactive) != 0)
+	{
+		bReadPending = true;
+	}
+	else
+	{
+		bRefreshPending = true;
+	}
 }
 void FNarrativeSpaceModel::AssetChanged(const FAssetData& Asset) { bRefreshPending = true; }
 void FNarrativeSpaceModel::AssetRenamed(const FAssetData& Asset, const FString& OldPath) { bRefreshPending = true; }

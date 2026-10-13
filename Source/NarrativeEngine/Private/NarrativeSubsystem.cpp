@@ -34,13 +34,82 @@ static TAutoConsoleVariable<int32> CVarNarrativeDecisionBudget(
  *		a. static TArray<FAssetData> GetAssetData()
  *		b. static TArray<TSoftObjectPtr<T>> GetLoadedAssets()
  */
+/** The types assets are filed under. An asset is filed under every one it derives from. */
+static TArray<UClass*> NarrativeAssetTypes()
+{
+	return {
+		UNarrativeBasisVector::StaticClass(),
+		UNarrativeEntityDef::StaticClass(),
+		UNarrativeEventDef::StaticClass(),
+		UNarrativeDialogDef::StaticClass(),
+		UArchetypeDef::StaticClass(),
+	};
+}
+
 void UNarrativeDataSubsystem::RegisterNarrativeAssets(FAssetRegistryModule& AssetRegistryModule)
 {
-	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeBasisVector)
-	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEntityDef)
-	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeEventDef)
-	REGISTER_NARRATIVE_ASSET_TYPE(UNarrativeDialogDef)
-	REGISTER_NARRATIVE_ASSET_TYPE(UArchetypeDef)
+	for (UClass* Type : NarrativeAssetTypes())
+	{
+		TArray<FAssetData> FoundAssets;
+		AssetRegistryModule.Get().GetAssetsByClass(Type->GetClassPathName(), FoundAssets, true /* bSearchSubClasses */);
+		for (const FAssetData& FoundAsset : FoundAssets)
+		{
+			NarrativeAssetData.Add(GetTypeHash(Type), FoundAsset);
+			// Eagerly load and pin: TSoftObjectPtr returned by TryLoad has no other
+			// owner, so we must root it here or GC will collect the asset.
+			PinAsset(Cast<UNarrativeDataAsset>(FoundAsset.GetSoftObjectPath().TryLoad()));
+		}
+	}
+}
+
+void UNarrativeDataSubsystem::RegisterAsset(UNarrativeDataAsset* InAsset)
+{
+	if (!IsValid(InAsset))
+	{
+		return;
+	}
+
+	// Drop any earlier filing first, so registering twice never deals the same card twice.
+	UnregisterAsset(InAsset);
+	const FAssetData Data(InAsset);
+	bool bFiled = false;
+	for (UClass* Type : NarrativeAssetTypes())
+	{
+		if (InAsset->IsA(Type))
+		{
+			NarrativeAssetData.Add(GetTypeHash(Type), Data);
+			bFiled = true;
+		}
+	}
+	if (bFiled)
+	{
+		PinAsset(InAsset);
+	}
+}
+
+bool UNarrativeDataSubsystem::UnregisterAsset(const UNarrativeDataAsset* InAsset)
+{
+	if (!InAsset)
+	{
+		return false;
+	}
+
+	bool bFiled = false;
+	const FSoftObjectPath Path(InAsset);
+	for (auto It = NarrativeAssetData.CreateIterator(); It; ++It)
+	{
+		if (It.Value().GetSoftObjectPath() == Path)
+		{
+			It.RemoveCurrent();
+			bFiled = true;
+		}
+	}
+	bFiled |= LoadedNarrativeAssets.RemoveAll([InAsset](const TObjectPtr<UNarrativeDataAsset>& Pinned) { return Pinned == InAsset; }) > 0;
+	for (auto It = NamedAssetCache.CreateIterator(); It; ++It)
+	{
+		if (It.Value() == InAsset) { It.RemoveCurrent(); }
+	}
+	return bFiled;
 }
 
 void UNarrativeDataSubsystem::OnAssetRegistryReady()

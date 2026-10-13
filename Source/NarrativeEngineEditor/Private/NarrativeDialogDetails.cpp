@@ -209,7 +209,11 @@ void FNarrativeDialogDetails::BuildDeed(IDetailLayoutBuilder& DetailBuilder)
 		[
 			SNew(SNarrativeReachBar)
 			.Sigma_Lambda([Sigma]() { return TOptional<float>(Sigma()); })
-			.OnReachChanged_Lambda([SetSigma](float Value, bool bInteractive) { SetSigma(Value, bInteractive); })
+			.OnReachChanged_Lambda([BeginDrag, SetSigma](float Value, bool bInteractive)
+			{
+				if (bInteractive) { BeginDrag(LOCTEXT("SetReach", "Set Reach")); }
+				SetSigma(Value, bInteractive);
+			})
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f)
 		[
@@ -506,9 +510,11 @@ void FNarrativeDialogDetails::EditCard(const FText& Description, TConstArrayView
 		return;
 	}
 
-	if (bInteractive)
+	// Only a drag that was opened explicitly writes live. A spin box also reports typed values, wheel and arrow
+	// steps as changes with no drag around them, and opening one there would leave it open for good. Those are
+	// edits of their own, and a typed value's echo after its commit changes nothing, so it cancels.
+	if (bInteractive && DragTransaction.IsValid())
 	{
-		BeginDrag(Description);
 		Edit(*Def);
 		return;
 	}

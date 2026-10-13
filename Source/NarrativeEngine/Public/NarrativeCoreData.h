@@ -11,13 +11,27 @@
 
 class UNarrativeDataAsset;
 
-UCLASS()
+UCLASS(MinimalAPI)
 class UNarrativeDataSubsystem : public UEngineSubsystem
 {
 	GENERATED_BODY()
 
 public:
 	void RegisterNarrativeAssets(FAssetRegistryModule& AssetRegistryModule);
+
+	/**
+	 * Files an asset made after the startup scan, such as one the editor just created, so it is
+	 * iterated and found by name like any other. Safe to call again for an asset already filed.
+	 * Assets that are none of the registered narrative types are ignored.
+	 */
+	NARRATIVEENGINE_API void RegisterAsset(UNarrativeDataAsset* InAsset);
+
+	/**
+	 * Forgets an asset and drops its pin, so nothing iterates or resolves it. The asset itself is
+	 * untouched. Returns whether it was filed at all.
+	 */
+	NARRATIVEENGINE_API bool UnregisterAsset(const UNarrativeDataAsset* InAsset);
+
 	void OnAssetRegistryReady();
 	void InitializeNarrativeAssetData();
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -34,8 +48,8 @@ public:
 	/**
 	 * O(1) name lookup.  Returns the asset whose UObject FName matches InName,
 	 * cast to T, or nullptr if not found or wrong type.
-	 * The cache is populated in PinAsset so it is always in sync with
-	 * LoadedNarrativeAssets.
+	 * The cache is populated in PinAsset and pruned in UnregisterAsset, so it is
+	 * always in sync with LoadedNarrativeAssets.
 	 */
 	template<typename T>
 	const T* GetAssetByName(FName InName) const
@@ -75,6 +89,8 @@ public:
 #if WITH_EDITOR
 	/** Editor placement contract. Override when more than one FVectorND has meaning. */
 	virtual FName GetSpacePlacementProperty() const;
+	/** The FNarrativeMask the space editor fills with the plotted axes when it makes this asset. None means no mask. */
+	virtual FName GetSpaceMaskProperty() const;
 	virtual FText GetSpaceLabel() const;
 	virtual TSoftObjectPtr<UTexture2D> GetSpaceIcon() const { return nullptr; }
 	virtual float GetSpaceRadius() const { return 0.f; }
