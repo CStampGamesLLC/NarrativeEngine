@@ -693,11 +693,20 @@ void SNarrativeSpaceViewport::ShowContextMenu(const FVector2D& At, const FVector
 		SelectionCount > 1
 			? FText::Format(LOCTEXT("RenameMany", "Rename {0} Assets"), FText::AsNumber(SelectionCount))
 			: LOCTEXT("RenameOne", "Rename Asset"),
-		LOCTEXT("RenameTip", "Rename the selected assets (F2), with the editor's usual reference fixup. This cannot be undone."),
+		LOCTEXT("RenameTip", "Rename the selected assets (F2), with the editor's usual reference fixup. Works during play. This cannot be undone."),
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::BeginRename),
-			FCanExecuteAction::CreateLambda([this] { return Model->CanManageAssets() && !Model->GetSelection().IsEmpty(); })));
+			FCanExecuteAction::CreateLambda([this] { return Model->CanRenameOrDuplicate() && !Model->GetSelection().IsEmpty(); })));
+	MenuBuilder.AddMenuEntry(
+		SelectionCount > 1
+			? FText::Format(LOCTEXT("DuplicateMany", "Duplicate {0} Assets"), FText::AsNumber(SelectionCount))
+			: LOCTEXT("DuplicateOne", "Duplicate Asset"),
+		LOCTEXT("DuplicateTip", "Copy the selected assets (Ctrl+D) and name the copies. The copies are left unsaved and keep their position. Works during play."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::DuplicateSelection),
+			FCanExecuteAction::CreateLambda([this] { return Model->CanRenameOrDuplicate() && !Model->GetSelection().IsEmpty(); })));
 	MenuBuilder.AddMenuEntry(
 		SelectionCount > 1
 			? FText::Format(LOCTEXT("DeleteMany", "Delete {0} Assets"), FText::AsNumber(SelectionCount))
@@ -751,6 +760,20 @@ void SNarrativeSpaceViewport::DeleteSelection()
 	Model->DeleteAssets(Assets);
 }
 
+void SNarrativeSpaceViewport::DuplicateSelection()
+{
+	const TArray<UNarrativeDataAsset*> Assets = SelectedAssets();
+	if (Assets.IsEmpty() || RenameMenu.IsValid()) { return; }
+
+	FinishInteraction(true);
+	// The copies are selected when this returns, so the rename box opens straight onto them.
+	// Step the copies down and to the right by about a third of a card, so the offset reads the
+	// same at any zoom and the copy is still visibly a separate card.
+	const double StepPixels = CardSize() * 0.35;
+	const FVector Offset = Camera.DragDelta(FVector2D(StepPixels, StepPixels));
+	if (!Model->DuplicateAssets(Assets, Offset).IsEmpty()) { BeginRename(); }
+}
+
 TArray<UNarrativeDataAsset*> SNarrativeSpaceViewport::SelectedAssets() const
 {
 	TArray<UNarrativeDataAsset*> Assets;
@@ -764,7 +787,7 @@ TArray<UNarrativeDataAsset*> SNarrativeSpaceViewport::SelectedAssets() const
 void SNarrativeSpaceViewport::BeginRename()
 {
 	const TArray<UNarrativeDataAsset*> Assets = SelectedAssets();
-	if (RenameMenu.IsValid() || Assets.IsEmpty() || !Model->CanManageAssets())
+	if (RenameMenu.IsValid() || Assets.IsEmpty() || !Model->CanRenameOrDuplicate())
 	{
 		return;
 	}
@@ -940,6 +963,7 @@ FReply SNarrativeSpaceViewport::OnKeyDown(const FGeometry& Geometry, const FKeyE
 		if (Key == EKeys::Z) { GEditor->UndoTransaction(); return FReply::Handled(); }
 		if (Key == EKeys::Y) { GEditor->RedoTransaction(); return FReply::Handled(); }
 		if (Key == EKeys::S) { Model->Save(); return FReply::Handled(); }
+		if (Key == EKeys::D) { DuplicateSelection(); return FReply::Handled(); }
 	}
 	return FReply::Unhandled();
 }

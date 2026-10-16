@@ -344,6 +344,67 @@ UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVec
 	return Asset;
 }
 
+TArray<UNarrativeDataAsset*> FNarrativeSpaceModel::DuplicateAssets(const TArray<UNarrativeDataAsset*>& Assets, const FVector& WorldOffset)
+{
+	TArray<UNarrativeDataAsset*> Copies;
+	if (!CanRenameOrDuplicate() || Assets.IsEmpty() || !CreationRecord) { return Copies; }
+	if (GIsTransacting || GEditor->IsTransactionActive())
+	{
+		UE_LOG(LogNarrativeSpace, Warning, TEXT("Duplicate skipped: another editor transaction is still open."));
+		return Copies;
+	}
+	EndDrag(true);
+
+	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
+	UNarrativeDataSubsystem* Catalog = DataCatalog();
+
+	// Like Make New, the record is what actually gets transacted, so one undo takes every copy back.
+	const FScopedTransaction DuplicateTransaction(LOCTEXT("DuplicateAssets", "Duplicate narrative assets"));
+	CreationRecord->Modify();
+
+	for (UNarrativeDataAsset* Original : Assets)
+	{
+		if (!Original || !IsValid(Original)) { continue; }
+		const FString Folder = FPackageName::GetLongPackagePath(Original->GetPackage()->GetName());
+		FString PackageName;
+		FString AssetName;
+		AssetTools.CreateUniqueAssetName(Folder / Original->GetName(), TEXT("_Copy"), PackageName, AssetName);
+
+		UNarrativeDataAsset* Copy = Cast<UNarrativeDataAsset>(AssetTools.DuplicateAsset(AssetName, Folder, Original));
+		if (!Copy) { continue; }
+
+		Copy->SetFlags(RF_Transactional);
+		Copy->MarkPackageDirty();
+
+		// Step the copy off the original so the two cards do not stack. Only axes the original
+		// actually defines move: Offset would otherwise author a coordinate it never had.
+		const FNarrativeSpacePoint* OriginalPoint = Points.FindByPredicate(
+			[Original](const FNarrativeSpacePoint& Point) { return Point.Asset.Get() == Original; });
+		if (OriginalPoint && !WorldOffset.IsNearlyZero())
+		{
+			FVector Delta = FVector::ZeroVector;
+			for (int32 Axis = 0; Axis < FMath::Min(3, Query.Axes.Num()); ++Axis)
+			{
+				if (OriginalPoint->PresentAxes & (1 << Axis)) { Delta[Axis] = WorldOffset[Axis]; }
+			}
+			if (FStructProperty* Property = ResolvePlacement(Copy))
+			{
+				FVectorND& Vector = *Property->ContainerPtrToValuePtr<FVectorND>(Copy);
+				Vector = FNarrativeSpaceModel::Offset(Vector, Query.Axes, Delta, INDEX_NONE, 0.0);
+			}
+		}
+		if (Catalog) { Catalog->RegisterAsset(Copy); }
+		CreationRecord->Created.Add(Copy);
+		CreatedAssets.Add(Copy);
+		LiveCreated.Add(Copy);
+		Copies.Add(Copy);
+	}
+
+	Refresh();
+	if (!Copies.IsEmpty()) { Select(Copies); }
+	return Copies;
+}
+
 int32 FNarrativeSpaceModel::DeleteAssets(const TArray<UNarrativeDataAsset*>& Assets, bool bShowConfirmation)
 {
 	if (!CanManageAssets() || Assets.IsEmpty())
@@ -451,7 +512,7 @@ FString FNarrativeSpaceModel::RenameSeed(const TArray<UNarrativeDataAsset*>& Ass
 bool FNarrativeSpaceModel::CanRenameAssets(const TArray<UNarrativeDataAsset*>& Assets, const FString& NewName, FText& OutError) const
 {
 	OutError = FText::GetEmpty();
-	if (!CanManageAssets() || IsDragging() || GIsTransacting || GEditor->IsTransactionActive())
+	if (!CanRenameOrDuplicate() || IsDragging() || GIsTransacting || GEditor->IsTransactionActive())
 	{
 		OutError = LOCTEXT("RenameBusy", "Renaming is not available right now.");
 		return false;
@@ -700,10 +761,17 @@ bool FNarrativeSpaceModel::CanCreateAssets() const
 
 bool FNarrativeSpaceModel::CanManageAssets() const
 {
-	// Renaming and deleting move packages around underneath a session that has those assets
-	// loaded, so they stay parked until it ends. Authoring values and creating are safe; this is not.
+	// Deleting frees packages underneath a session that has those assets loaded, so it stays parked
+	// until the session ends. Authoring values, creating, renaming and duplicating are safe; this is not.
 	// The source makes no difference: with nothing playing, both modes show authored values.
 	return CanEdit() && GEditor && !GEditor->IsPlaySessionInProgress();
+}
+
+bool FNarrativeSpaceModel::CanRenameOrDuplicate() const
+{
+	// A rename keeps the loaded object and only changes its name, and RenameAssets re-files it with
+	// the catalog the session deals from. A copy is a new package nothing has loaded, like Make New.
+	return CanEdit() && GEditor != nullptr;
 }
 
 TArray<UObject*> FNarrativeSpaceModel::GetSelection() const

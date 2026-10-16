@@ -44,7 +44,8 @@ field that was edited, even after choosing another field.
 | Frame selection / all | F / Home, or toolbar buttons |
 | 3D orientation | XY, XZ, YZ, Iso; Alt+right mouse drag orbits |
 | Open asset editor | Double-click |
-| Rename selected assets | F2, or right-click > Rename; Esc closes the box |
+| Rename selected assets | F2, or right-click > Rename; Esc closes the box; works during PIE |
+| Duplicate selected assets | Ctrl+D, or right-click > Duplicate; opens the rename box on the copies |
 | Undo / redo | Ctrl+Z / Ctrl+Y while viewport has focus |
 | Save | Save matching assets, or Ctrl+S in viewport |
 | Place Content Browser assets | Drop assets matching the current query onto the viewport |
@@ -80,6 +81,15 @@ Browser uses: each asset keeps its folder, references and redirectors follow, an
 Unreal reports whatever it cannot rename. One asset takes the typed name; several
 are numbered from it in plot order. Like a Content Browser rename, this is not
 undoable, and it writes the renamed package out even if it had never been saved.
+Rename works during PIE: the asset keeps its loaded object and the runtime catalog
+is re-filed under the new path. Delete stays parked until the session ends.
+
+Ctrl+D (or right-click > Duplicate) copies the selected assets into their own
+folders as `<Name>_Copy`, keeps the copy's authored values, selects the copies, and
+opens the rename box over them. Each copy is nudged down and to the right by about a
+third of a card at the current zoom (in the view plane, on the axes its original
+defines), so it does not stack on the original. Esc keeps the generated name. Like Make New, copies are left
+unsaved, are one undo step, and are dealt to a running session straight away.
 
 Saving is explicit: **Save matching assets** offers Unreal's checkout-and-save
 dialog for dirty packages currently represented by the query, including changes

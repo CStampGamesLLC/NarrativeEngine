@@ -125,6 +125,9 @@ private:
 	/** Deletes the selected assets outright, through the editor's confirmation dialog. */
 	void DeleteSelection();
 
+	/** Copies the selected assets, selects the copies and opens the rename box over them. */
+	void DuplicateSelection();
+
 	/** The selection as data assets, in plot order, which is also the order a rename numbers them in. */
 	TArray<UNarrativeDataAsset*> SelectedAssets() const;
 

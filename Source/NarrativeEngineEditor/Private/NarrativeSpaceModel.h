@@ -99,8 +99,11 @@ public:
 	/** True when Make New may create assets. A play session does not stop this. */
 	bool CanCreateAssets() const;
 
-	/** True when assets may be renamed or deleted. Never while a play session holds them. */
+	/** True when assets may be deleted. Never while a play session holds them. */
 	bool CanManageAssets() const;
+
+	/** True when assets may be renamed or duplicated. A play session does not stop this. */
+	bool CanRenameOrDuplicate() const;
 	TArray<UObject*> GetSelection() const;
 	bool IsSelected(const UNarrativeDataAsset* Asset) const;
 	void Select(const TArray<UNarrativeDataAsset*>& Assets, bool bAdd = false);
@@ -124,6 +127,14 @@ public:
 	 * outside the undo buffer, exactly like deleting from the Content Browser. Returns the count.
 	 */
 	int32 DeleteAssets(const TArray<UNarrativeDataAsset*>& Assets, bool bShowConfirmation = true);
+
+	/**
+	 * Copies each asset into its own folder under a fresh name, keeping the copy's authored values
+	 * and selects the copies. Each copy is moved by WorldOffset along the plotted axes its original
+	 * defines, so it does not sit on top of it. The copies are unsaved and undoable like Make New,
+	 * and a running session is handed them straight away. Returns the copies, in the order given.
+	 */
+	TArray<UNarrativeDataAsset*> DuplicateAssets(const TArray<UNarrativeDataAsset*>& Assets, const FVector& WorldOffset = FVector::ZeroVector);
 
 	/**
 	 * Renames assets in place through the editor's own rename, so references, redirectors and
