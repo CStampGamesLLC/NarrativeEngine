@@ -27,6 +27,16 @@ namespace NarrativeSpaceDraw
 
 	constexpr int32 RingSegments = 64;
 
+	/**
+	 * Card size grows with the square root of zoom, so this is the large-card size at half the zoom:
+	 * the widest unselected reach ring appears from twice as far out as the coordinates and class name do.
+	 * Narrower rings wait for finer zoom, up to LargeCardSize for the narrowest.
+	 */
+	constexpr double ReachCardSize = LargeCardSize * UE_DOUBLE_INV_SQRT_2;
+	constexpr float SelectedReachOpacity = 0.6f;
+	/** Only to keep a runaway radius from building a ring too large for float vertices. */
+	constexpr double MaxSelectedReachPixels = 1.0e6;
+
 	const FVector2D ClusterHalfSize(23, 16);
 
 	const FLinearColor BackgroundColor(0.018f, 0.024f, 0.033f);
@@ -249,8 +259,11 @@ TArray<SNarrativeSpaceViewport::FVisibleItem> SNarrativeSpaceViewport::VisibleIt
 			Screen.Y += (Lane % 2 == 0 ? Lane / 2 : -(Lane + 1) / 2) * (Half.Y * 2 + LaneGap);
 		}
 
-		const bool bOffscreen = Screen.X + Half.X < 0 || Screen.Y + Half.Y < 0
-			|| Screen.X - Half.X > Size.X || Screen.Y - Half.Y > Size.Y;
+		// A selected card's reach ring can cross the view while the card itself is off it.
+		const double ReachPixels = Model->IsSelected(Point.Asset.Get()) ? Point.Radius * Camera.Zoom : 0.0;
+		const FVector2D Margin = Half + FVector2D(ReachPixels);
+		const bool bOffscreen = Screen.X + Margin.X < 0 || Screen.Y + Margin.Y < 0
+			|| Screen.X - Margin.X > Size.X || Screen.Y - Margin.Y > Size.Y;
 		if (bOffscreen) { continue; }
 
 		if (Extent < DetailCardSize)
@@ -375,6 +388,9 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 	// Cards, back to front.
 	const double Extent = CardSize();
 	int32 NextLayer = LayerId + 3;
+	// Reach is judged against the widest range plotted, not just the visible ones, so rings don't change role as you pan.
+	float MaxReach = 0.f;
+	for (const FNarrativeSpacePoint& Plotted : Points) { MaxReach = FMath::Max(MaxReach, Plotted.Radius); }
 	for (const FVisibleItem& Item : VisibleItems(Size))
 	{
 		// Keep all primitives for a card together so nearer cards occlude far labels too.
@@ -398,19 +414,42 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		const float IncompleteFade = Item.bIncomplete && IncompleteDisplay == ENarrativeSpaceIncomplete::Dim ? DimOpacity : 1.f;
 		Color.A *= IncompleteFade;
 
-		if (Item.Indices.Num() == 1 && Extent >= LargeCardSize && Point.Radius > 0)
+		auto DrawReach = [&](const FVector2D& Center, double Radius, const FLinearColor& RingColor)
 		{
-			const double Radius = Point.Radius * Camera.Zoom;
-			if (Radius < Size.Size() * 4)
+			TArray<FVector2D> Ring;
+			Ring.Reserve(RingSegments + 1);
+			for (int32 Segment = 0; Segment <= RingSegments; ++Segment)
 			{
-				TArray<FVector2D> Ring;
-				Ring.Reserve(RingSegments + 1);
-				for (int32 Segment = 0; Segment <= RingSegments; ++Segment)
-				{
-					const double Angle = Segment * UE_DOUBLE_TWO_PI / RingSegments;
-					Ring.Add(Item.Screen + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
-				}
-				Line(Ring, Color.CopyWithNewOpacity(0.3f), CardLayer);
+				const double Angle = Segment * UE_DOUBLE_TWO_PI / RingSegments;
+				Ring.Add(Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
+			}
+			Line(Ring, RingColor, CardLayer);
+		};
+
+		// A selected card always shows its reach, however far out the view is or however big the ring grows.
+		bool bSelectedReach = false;
+		for (const int32 Index : Item.Indices)
+		{
+			const FNarrativeSpacePoint& Member = Points[Index];
+			const double Radius = Member.Radius * Camera.Zoom;
+			if (Member.Radius > 0 && Radius < MaxSelectedReachPixels && Model->IsSelected(Member.Asset.Get()))
+			{
+				// A cluster has no single centre, so each member's ring sits on its own projection.
+				DrawReach(Item.Indices.Num() == 1 ? Item.Screen : Camera.Project(Member.Position, Size), Radius,
+					SelectedCardColor.CopyWithNewOpacity(SelectedReachOpacity * IncompleteFade));
+				bSelectedReach = true;
+			}
+		}
+
+		// Unselected cards reveal their reach by size: the widest range from twice as far out as a large card
+		// shows its detail, the narrowest only at that detail zoom, and the ones between ease from one to the other.
+		if (!bSelectedReach && Item.Indices.Num() == 1 && Point.Radius > 0 && MaxReach > 0.f)
+		{
+			const double Threshold = FMath::Lerp(LargeCardSize, ReachCardSize, FMath::Clamp(Point.Radius / MaxReach, 0.f, 1.f));
+			const double Radius = Point.Radius * Camera.Zoom;
+			if (Extent >= Threshold && Radius < Size.Size() * 8)
+			{
+				DrawReach(Item.Screen, Radius, Color.CopyWithNewOpacity(0.3f));
 			}
 		}
 

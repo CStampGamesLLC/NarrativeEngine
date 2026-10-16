@@ -9,6 +9,7 @@
 #include "FileHelpers.h"
 #include "Misc/PackageName.h"
 #include "NarrativeCoreData.h"
+#include "NarrativeSpaceEditorSettings.h"
 #include "NarrativeStaticData.h"
 #include "NarrativeSubsystem.h"
 #include "ObjectTools.h"
@@ -297,7 +298,7 @@ UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVec
 
 	FString BaseName = Class->GetName();
 	BaseName.RemoveFromEnd(TEXT("_C"));
-	const FString Path = Query.ContentPath.IsEmpty() ? TEXT("/Game") : Query.ContentPath;
+	const FString Path = UNarrativeSpaceEditorSettings::ResolveCreationFolder(Class, Query.ContentPath);
 
 	FString PackageName;
 	FString AssetName;

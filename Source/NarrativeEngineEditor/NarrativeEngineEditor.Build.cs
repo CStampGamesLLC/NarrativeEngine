@@ -14,6 +14,7 @@ public class NarrativeEngineEditor : ModuleRules
                 "UMG",
                 "CoreUObject",
                 "Engine",
+                "DeveloperSettings",
                 "NarrativeEngine",
             }
         );

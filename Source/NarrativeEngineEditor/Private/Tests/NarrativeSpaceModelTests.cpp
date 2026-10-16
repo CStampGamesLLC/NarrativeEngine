@@ -1,4 +1,5 @@
 ﻿#include "NarrativeSpaceModel.h"
+#include "NarrativeSpaceEditorSettings.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -12,6 +13,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "NarrativeCoreData.h"
 #include "NarrativeStaticData.h"
 #include "SNarrativeSpaceEditor.h"
@@ -443,3 +445,39 @@ bool FNarrativeSpaceRenderTest::RunTest(const FString& Parameters)
 	return true;
 }
 #endif
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceCreationFolderTest, "Narrative.Space.CreationFolder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceCreationFolderTest::RunTest(const FString& Parameters)
+{
+	UNarrativeSpaceEditorSettings* Settings = GetMutableDefault<UNarrativeSpaceEditorSettings>();
+	const TArray<FNarrativeCreationFolder> Saved = Settings->CreationFolders;
+	ON_SCOPE_EXIT { Settings->CreationFolders = Saved; };
+
+	FNarrativeCreationFolder Row;
+	Row.Class = UNarrativeDataAsset::StaticClass();
+	Row.Folder.Path = TEXT("/Game/Base/");
+	Settings->CreationFolders = {Row};
+	Row.Class = UNarrativeDialogDef::StaticClass();
+	Row.Folder.Path = TEXT("/Game/Dialog");
+	Settings->CreationFolders.Add(Row);
+
+	using FSettings = UNarrativeSpaceEditorSettings;
+	TestEqual(TEXT("A listed class gets its own folder"),
+		FSettings::ResolveCreationFolder(UNarrativeDialogDef::StaticClass(), TEXT("/Game")), TEXT("/Game/Dialog"));
+	TestEqual(TEXT("A derived class takes the nearest listed ancestor, trailing slash trimmed"),
+		FSettings::ResolveCreationFolder(UNarrativeEntityDef::StaticClass(), TEXT("/Game")), TEXT("/Game/Base"));
+	TestEqual(TEXT("A folder outside the query's content path falls back to it"),
+		FSettings::ResolveCreationFolder(UNarrativeDialogDef::StaticClass(), TEXT("/Game/Other")), TEXT("/Game/Other"));
+	TestEqual(TEXT("A query rooted at the folder itself keeps it"),
+		FSettings::ResolveCreationFolder(UNarrativeDialogDef::StaticClass(), TEXT("/Game/Dialog")), TEXT("/Game/Dialog"));
+	TestEqual(TEXT("A sibling sharing a name prefix is not under the query path"),
+		FSettings::ResolveCreationFolder(UNarrativeDialogDef::StaticClass(), TEXT("/Game/Dial")), TEXT("/Game/Dial"));
+
+	Settings->CreationFolders.Reset();
+	TestEqual(TEXT("Nothing listed falls back to the query path"),
+		FSettings::ResolveCreationFolder(UNarrativeDialogDef::StaticClass(), TEXT("/Game/Q")), TEXT("/Game/Q"));
+	TestEqual(TEXT("An empty query path means /Game"),
+		FSettings::ResolveCreationFolder(UNarrativeDialogDef::StaticClass(), FString()), TEXT("/Game"));
+	return true;
+}
