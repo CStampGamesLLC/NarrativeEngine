@@ -516,6 +516,14 @@ void FNarrativeDialogDetails::EditCard(const FText& Description, TConstArrayView
 	if (bInteractive && DragTransaction.IsValid())
 	{
 		Edit(*Def);
+
+		// The value is written straight into the card, which tells nobody. Announce each step the way the stock
+		// property editor does, so the narrative space re-reads the card and its reach ring tracks the drag.
+		for (const FName Name : Properties)
+		{
+			FPropertyChangedEvent Event(FindFProperty<FProperty>(UNarrativeDialogDef::StaticClass(), Name), EPropertyChangeType::Interactive);
+			Def->PostEditChangeProperty(Event);
+		}
 		return;
 	}
 

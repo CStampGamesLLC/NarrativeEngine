@@ -481,3 +481,32 @@ bool FNarrativeSpaceCreationFolderTest::RunTest(const FString& Parameters)
 		FSettings::ResolveCreationFolder(UNarrativeDialogDef::StaticClass(), FString()), TEXT("/Game"));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceLiveReachTest, "Narrative.Space.LiveReach",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceLiveReachTest::RunTest(const FString& Parameters)
+{
+	NarrativeSpaceTests::FFixture Fixture;
+	Fixture.Dialog->Location.SetCoordinate(Fixture.X, 1.f);
+	Fixture.Dialog->Location.SetCoordinate(Fixture.Y, 2.f);
+	Fixture.Dialog->SpaceSigma = 3.f;
+	FNarrativeSpaceModel Model;
+	Model.SetQuery(Fixture.Query());
+
+	auto ReachOf = [&Model, &Fixture]() -> TOptional<float>
+	{
+		const FNarrativeSpacePoint* Point = Model.GetPoints().FindByPredicate(
+			[&Fixture](const FNarrativeSpacePoint& Candidate) { return Candidate.Asset == Fixture.Dialog; });
+		return Point ? TOptional<float>(Point->Radius) : TOptional<float>();
+	};
+	if (!TestEqual(TEXT("The ring starts at the card's reach"), ReachOf(), TOptional<float>(3.f))) { return false; }
+
+	// A reach slider mid-drag: the value changes and an interactive change is announced, with no commit yet.
+	Fixture.Dialog->SpaceSigma = 7.f;
+	FPropertyChangedEvent Event(FindFProperty<FProperty>(UNarrativeDialogDef::StaticClass(), GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, SpaceSigma)),
+		EPropertyChangeType::Interactive);
+	Fixture.Dialog->PostEditChangeProperty(Event);
+	Model.Tick();
+	TestEqual(TEXT("The ring follows the slider without waiting for the commit"), ReachOf(), TOptional<float>(7.f));
+	return true;
+}
