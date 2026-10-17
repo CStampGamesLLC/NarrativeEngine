@@ -11,6 +11,7 @@
 
 class IDetailsView;
 class ITableRow;
+class SNarrativeSpaceSearch;
 class SNarrativeSpaceViewport;
 class STableViewBase;
 
@@ -36,6 +37,25 @@ public:
 	 */
 	void ToggleAxis(const TSoftObjectPtr<UNarrativeBasisVector>& Axis);
 
+	/**
+	 * Takes the user to an asset in the space: tags its two most relevant axes (see
+	 * NarrativeSpaceSearch::RelevantAxes), widens any class, path or field filter that would leave it
+	 * out, then selects and centres it. A basis asset is an axis rather than a point, so going to one
+	 * tags it as X, keeping the previous X as Y. Returns false, changing nothing, for an asset with no
+	 * position in the space.
+	 */
+	bool GoToAsset(UNarrativeDataAsset* Asset);
+
+	/** Selects whichever of these assets the current axes plot, and frames them. Returns how many. */
+	int32 ShowAssets(const TArray<UNarrativeDataAsset*>& Assets);
+
+	/** Ctrl+F: puts focus in the search bar. */
+	void FocusSearch();
+
+	//~ Begin SWidget interface
+	virtual FReply OnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& Event) override;
+	//~ End SWidget interface
+
 private:
 	/** One row of the axis list: a basis asset in the project, tagged as an axis or not. */
 	using FAxisOption = TSharedPtr<TSoftObjectPtr<UNarrativeBasisVector>>;
@@ -43,6 +63,7 @@ private:
 	TStrongObjectPtr<UNarrativeSpaceSettings> Settings;
 	TSharedPtr<FNarrativeSpaceModel> Model;
 	TSharedPtr<SNarrativeSpaceViewport> Viewport;
+	TSharedPtr<SNarrativeSpaceSearch> Search;
 	TSharedPtr<IDetailsView> QueryDetails;
 	TSharedPtr<IDetailsView> AssetDetails;
 	TSharedPtr<SComboBox<TSharedPtr<FName>>> FieldPicker;
@@ -53,6 +74,10 @@ private:
 	TArray<TWeakObjectPtr<UObject>> DisplayedSelection;
 
 	void CreateDetailViews();
+	void CreateSearch();
+
+	/** Tells the user why the search could not take them somewhere. */
+	static void Notify(const FText& Message);
 	void CreateFieldPicker();
 	void CreateAxisList();
 	TSharedRef<SWidget> CreateToolbar();

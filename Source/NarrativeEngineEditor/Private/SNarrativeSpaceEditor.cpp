@@ -1,8 +1,13 @@
 ﻿#include "SNarrativeSpaceEditor.h"
 
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Notifications/NotificationManager.h"
 #include "IDetailsView.h"
+#include "Misc/PackageName.h"
 #include "NarrativeSpaceModel.h"
+#include "NarrativeSpaceSearch.h"
 #include "PropertyEditorModule.h"
+#include "SNarrativeSpaceSearch.h"
 #include "SNarrativeSpaceViewport.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenus.h"
@@ -13,6 +18,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
@@ -46,10 +52,15 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 	Model->OnBasisAssetsChanged.AddSP(this, &SNarrativeSpaceEditor::RefreshAxisOptions);
 	CreateAxisList();
 	RefreshAxisOptions();
+	CreateSearch();
 
 	ChildSlot
 	[
 		SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().Padding(8, 6, 8, 0)
+		[
+			Search.ToSharedRef()
+		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(4)
 		[
 			CreateToolbar()
@@ -113,7 +124,7 @@ void SNarrativeSpaceEditor::Construct(const FArguments& Args)
 		[
 			SNew(STextBlock)
 			.AutoWrapText(true)
-			.Text(LOCTEXT("Help", "Drag: move | Shift-click / marquee: select | Tab / Shift-Tab: step through entries | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB drag / MMB: pan | RMB click: menu | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | F2: rename assets | Delete: delete assets | Ctrl+Z/Y: undo/redo. Static values stay editable during play and are pushed into the running simulation; runtime positions belong to the simulation and are read only. Creating, renaming and deleting assets wait until play ends."))
+			.Text(LOCTEXT("Help", "Ctrl+F: search (Enter: go to the asset on its two most relevant axes) | Drag: move | Shift-click / marquee: select | Tab / Shift-Tab: step through entries | Hold X/Y/Z: lock | Ctrl: snap | Esc: cancel | RMB drag / MMB: pan | RMB click: menu | Wheel: zoom | Alt+RMB: orbit | F/Home: frame | Double-click: open | F2: rename assets | Delete: delete assets | Ctrl+Z/Y: undo/redo. Static values stay editable during play and are pushed into the running simulation; runtime positions belong to the simulation and are read only. Creating, renaming and deleting assets wait until play ends."))
 		]
 	];
 }
@@ -145,6 +156,131 @@ void SNarrativeSpaceEditor::CreateDetailViews()
 	// session runs is the point of runtime mode.
 	AssetDetails->SetIsPropertyEditingEnabledDelegate(FIsPropertyEditingEnabled::CreateLambda(
 		[this] { return Model->CanEdit() && !Model->IsDragging(); }));
+}
+
+void SNarrativeSpaceEditor::CreateSearch()
+{
+	auto FocusViewport = [this] { FSlateApplication::Get().SetKeyboardFocus(Viewport, EFocusCause::SetDirectly); };
+
+	SAssignNew(Search, SNarrativeSpaceSearch)
+		.Model(Model)
+		.OnPick_Lambda([this, FocusViewport](UNarrativeDataAsset* Asset)
+		{
+			// Into the space rather than the Content Browser, and the viewport keeps the keyboard so
+			// F2, Delete and the rest act on what was just found.
+			if (GoToAsset(Asset)) { FocusViewport(); }
+		})
+		.OnPickAll_Lambda([this, FocusViewport](const TArray<UNarrativeDataAsset*>& Assets)
+		{
+			if (ShowAssets(Assets) > 0) { FocusViewport(); return; }
+			Notify(FText::Format(LOCTEXT("NoneShown", "None of the {0} matches are plotted on the current axes. Press Enter on one to tag its axes."),
+				FText::AsNumber(Assets.Num())));
+		})
+		.OnMatchesChanged_Lambda([this]
+		{
+			Viewport->SetSearchMatches(Search->IsSearching()
+				? TOptional<TSet<TWeakObjectPtr<UNarrativeDataAsset>>>(Search->GetMatches())
+				: TOptional<TSet<TWeakObjectPtr<UNarrativeDataAsset>>>());
+		})
+		.OnDismissed_Lambda(FocusViewport);
+}
+
+void SNarrativeSpaceEditor::FocusSearch()
+{
+	Search->Activate();
+}
+
+FReply SNarrativeSpaceEditor::OnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& Event)
+{
+	// Previewed rather than bubbled so it works wherever focus sits in the tool, the viewport included.
+	if (Event.GetKey() == EKeys::F && Event.IsControlDown() && !Event.IsAltDown() && !Event.IsShiftDown())
+	{
+		FocusSearch();
+		return FReply::Handled();
+	}
+	return SCompoundWidget::OnPreviewKeyDown(Geometry, Event);
+}
+
+void SNarrativeSpaceEditor::Notify(const FText& Message)
+{
+	FNotificationInfo Info(Message);
+	Info.ExpireDuration = 5.f;
+	FSlateNotificationManager::Get().AddNotification(Info);
+}
+
+bool SNarrativeSpaceEditor::GoToAsset(UNarrativeDataAsset* Asset)
+{
+	if (!Asset) { return false; }
+	FNarrativeSpaceQuery& Query = Settings->Query;
+
+	FName Field;
+	const FVectorND* Vector = NarrativeSpaceSearch::PlacementVector(*Asset, Query.PlacementField, &Field);
+	const TArray<TSoftObjectPtr<UNarrativeBasisVector>> Axes = Vector
+		? NarrativeSpaceSearch::RelevantAxes(*Vector, NarrativeSpaceSearch::SpaceMask(*Asset), 2)
+		: TArray<TSoftObjectPtr<UNarrativeBasisVector>>();
+
+	if (UNarrativeBasisVector* Basis = Cast<UNarrativeBasisVector>(Asset); Basis && Axes.IsEmpty())
+	{
+		// An axis rather than a point. Tag it as X and keep the old X, or the old Y when it already
+		// was X, so there is still a plane to look at; the axis list shows where it landed.
+		TArray<TSoftObjectPtr<UNarrativeBasisVector>> NewAxes = {Basis};
+		for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : Query.Axes)
+		{
+			if (Axis != NewAxes[0]) { NewAxes.Add(Axis); break; }
+		}
+		Query.Axes = MoveTemp(NewAxes);
+		ApplyQuery();
+		Model->Select({});
+		return true;
+	}
+	if (Axes.IsEmpty())
+	{
+		Notify(FText::Format(LOCTEXT("NoPosition", "{0} has no position in the narrative space to go to. Ctrl+Enter in the search bar opens its editor."),
+			FText::FromString(Asset->GetName())));
+		return false;
+	}
+
+	// Widen whatever in the query would leave the asset out, and nothing more. An explicit placement
+	// field the asset lacks gives way to each class's default, which is the vector the axes came from.
+	if (Field != Query.PlacementField) { Query.PlacementField = NAME_None; }
+	const bool bClassMatches = Query.Classes.IsEmpty() || Query.Classes.ContainsByPredicate(
+		[Asset](const TSubclassOf<UNarrativeDataAsset>& Class) { return Class && Asset->IsA(Class); });
+	if (!bClassMatches) { Query.Classes.Add(Asset->GetClass()); }
+
+	const FString PackageName = Asset->GetPackage()->GetName();
+	FString Root = Query.ContentPath.IsEmpty() ? TEXT("/Game") : Query.ContentPath;
+	Root.RemoveFromEnd(TEXT("/"));
+	if (!PackageName.StartsWith(Root + TEXT("/")))
+	{
+		// Out to the asset's mount point: /Game, or the plugin it lives in.
+		Query.ContentPath = TEXT("/") + FPackageName::GetPackageMountPoint(PackageName).ToString();
+	}
+
+	Query.Axes = Axes;
+	QueryDetails->ForceRefresh();
+	ApplyQuery();
+	RefreshFieldOptions();
+
+	Model->Select({Asset});
+	Viewport->FocusSelection();
+	return Model->IsSelected(Asset);
+}
+
+int32 SNarrativeSpaceEditor::ShowAssets(const TArray<UNarrativeDataAsset*>& Assets)
+{
+	// Only what the current axes actually draw, so the axes stay as they are and nothing hidden for
+	// missing one of them is selected out of sight.
+	const uint8 AllAxes = uint8((1 << Model->GetQuery().Axes.Num()) - 1);
+	TArray<UNarrativeDataAsset*> Shown;
+	for (const FNarrativeSpacePoint& Point : Model->GetPoints())
+	{
+		UNarrativeDataAsset* Asset = Point.Asset.Get();
+		const bool bHidden = Settings->Incomplete == ENarrativeSpaceIncomplete::Hide && Point.PresentAxes != AllAxes;
+		if (Asset && !bHidden && Assets.Contains(Asset)) { Shown.Add(Asset); }
+	}
+	Model->Select(Shown);
+	if (!Shown.IsEmpty()) { Viewport->FocusSelection(); }
+	return Shown.Num();
 }
 
 void SNarrativeSpaceEditor::CreateFieldPicker()

@@ -633,7 +633,7 @@ void FNarrativeSpaceModel::Refresh()
 			FNarrativeSpacePoint& Point = Points.AddDefaulted_GetRef();
 			Point.Asset = Asset;
 			Point.Label = Asset->GetSpaceLabel();
-			Point.Color = FLinearColor::MakeFromHSV8(uint8(GetTypeHash(Asset->GetClass()->GetPathName()) % 255), 130, 230);
+			Point.Color = ClassColor(Asset->GetClass());
 			if (UTexture2D* Texture = Asset->GetSpaceIcon().LoadSynchronous())
 			{
 				LoadedIcons.Add(Texture);
@@ -788,6 +788,11 @@ void FNarrativeSpaceModel::Select(const TArray<UNarrativeDataAsset*>& Assets, bo
 	if (!bAdd) { Selection.Reset(); }
 	for (UNarrativeDataAsset* Asset : Assets) { if (LoadedAssets.Contains(Asset)) { Selection.Add(Asset); } }
 	OnSelectionChanged.Broadcast();
+}
+
+FLinearColor FNarrativeSpaceModel::ClassColor(const UClass* Class)
+{
+	return Class ? FLinearColor::MakeFromHSV8(uint8(GetTypeHash(Class->GetPathName()) % 255), 130, 230) : FLinearColor::Gray;
 }
 
 FVectorND FNarrativeSpaceModel::Offset(const FVectorND& Original, const TArray<TSoftObjectPtr<UNarrativeBasisVector>>& Axes,

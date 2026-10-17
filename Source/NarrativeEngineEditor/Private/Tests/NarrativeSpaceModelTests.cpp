@@ -16,6 +16,7 @@
 #include "Misc/ScopeExit.h"
 #include "NarrativeCoreData.h"
 #include "NarrativeStaticData.h"
+#include "NarrativeSpaceSearch.h"
 #include "SNarrativeSpaceEditor.h"
 #include "SNarrativeSpaceViewport.h"
 #include "InputCoreTypes.h"
@@ -442,6 +443,102 @@ bool FNarrativeSpaceRenderTest::RunTest(const FString& Parameters)
 		}
 		Window->RequestDestroyWindow();
 	}, 1.0f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceSearchIndexTest, "Narrative.Space.Search.Index",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceSearchIndexTest::RunTest(const FString& Parameters)
+{
+	NarrativeSpaceTests::FFixture Fixture;
+	UNarrativeBasisVector* Ferocity = Fixture.Add<UNarrativeBasisVector>(TEXT("Ferocity"));
+	UNarrativeDialogDef* Brave = Fixture.Add<UNarrativeDialogDef>(TEXT("Brave"));
+	Fixture.Dialog->Phrase = FText::FromString(TEXT("Back off, or I will break your arms. Only the brave stay."));
+	Fixture.Dialog->Label = FText::FromString(TEXT("Threaten"));
+	Fixture.Dialog->Location.SetCoordinate(Ferocity, 4);
+	Fixture.Dialog->Mask.Add(Ferocity);
+
+	const TArray<FNarrativeSearchEntry> Entries = {
+		NarrativeSpaceSearch::Index(*Fixture.Dialog), NarrativeSpaceSearch::Index(*Brave)};
+	auto Names = [&Entries](const TCHAR* Query)
+	{
+		TArray<FString> Result;
+		for (const FNarrativeSearchResult& Found : NarrativeSpaceSearch::Find(Entries, Query)) { Result.Add(Found.Name); }
+		return Result;
+	};
+
+	const TArray<FNarrativeSearchResult> Phrase = NarrativeSpaceSearch::Find(Entries, TEXT("BREAK arms"));
+	if (!TestEqual(TEXT("Every word of a phrase search lands on the one card saying it"), Phrase.Num(), 1)) { return false; }
+	TestEqual(TEXT("The phrase field explains the match"), Phrase[0].Field.ToString(), FString(TEXT("Phrase")));
+	TestTrue(TEXT("The snippet shows the matched words"), Phrase[0].Snippet.Contains(TEXT("break your arms")));
+	TestEqual(TEXT("FText labels are searchable"), Names(TEXT("threat")), TArray<FString>{TEXT("Dialog")});
+	TestTrue(TEXT("Every word has to match somewhere"), Names(TEXT("break nothingmatchesthis")).IsEmpty());
+	TestTrue(TEXT("Axes a vector or mask is placed on are not metadata"), Names(TEXT("Ferocity")).IsEmpty());
+	TestEqual(TEXT("A name hit outranks the same word inside a phrase"), Names(TEXT("brave")), (TArray<FString>{TEXT("Brave"), TEXT("Dialog")}));
+	TestEqual(TEXT("The type is searchable"), Names(TEXT("dialog def")).Num(), 2);
+
+	const FString Long = FString::ChrN(100, TEXT('a')) + TEXT("needle") + FString::ChrN(100, TEXT('b'));
+	const FString Cut = NarrativeSpaceSearch::Snippet(Long, 100, 6, 10);
+	TestEqual(TEXT("A snippet keeps the match with context, trimmed both ends"), Cut,
+		FString(TEXT("...")) + FString::ChrN(10, TEXT('a')) + TEXT("needle") + FString::ChrN(10, TEXT('b')) + TEXT("..."));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceSearchGoToTest, "Narrative.Space.Search.GoTo",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceSearchGoToTest::RunTest(const FString& Parameters)
+{
+	NarrativeSpaceTests::FFixture Fixture;
+	UNarrativeBasisVector* W = Fixture.Add<UNarrativeBasisVector>(TEXT("W"));
+
+	// Mask axes come first, then the largest coordinates; an axis the vector lacks is never offered.
+	FVectorND Value;
+	Value.SetCoordinate(Fixture.X, 1);
+	Value.SetCoordinate(Fixture.Y, -9);
+	Value.SetCoordinate(Fixture.Z, 3);
+	FNarrativeMask Mask;
+	Mask.Add(Fixture.X);
+	Mask.Add(W);
+	const TArray<TSoftObjectPtr<UNarrativeBasisVector>> Relevant = NarrativeSpaceSearch::RelevantAxes(Value, &Mask, 2);
+	TestEqual(TEXT("Two axes are chosen"), Relevant.Num(), 2);
+	TestTrue(TEXT("The masked axis leads"), Relevant.Num() == 2 && Relevant[0].Get() == Fixture.X);
+	TestTrue(TEXT("Then the largest coordinate, by magnitude"), Relevant.Num() == 2 && Relevant[1].Get() == Fixture.Y);
+	TestEqual(TEXT("Without a mask, magnitude alone decides"), NarrativeSpaceSearch::RelevantAxes(Value, nullptr, 1),
+		TArray<TSoftObjectPtr<UNarrativeBasisVector>>{Fixture.Y});
+
+	// The query starts on X/Y and shows entities only; the card lives on Z and W.
+	FNarrativeSpaceQuery Query = Fixture.Query();
+	Query.Classes = {UNarrativeEntityDef::StaticClass()};
+	Fixture.Dialog->Location.SetCoordinate(Fixture.Z, 2);
+	Fixture.Dialog->Location.SetCoordinate(W, 7);
+	Fixture.Dialog->Location.SetCoordinate(Fixture.X, 1);
+	Fixture.Dialog->Mask.Add(Fixture.Z);
+	const TSharedRef<SNarrativeSpaceEditor> Widget = SNew(SNarrativeSpaceEditor).InitialQuery(Query);
+	const TSharedPtr<FNarrativeSpaceModel> Model = Widget->GetModel();
+
+	TestTrue(TEXT("Going to a card succeeds"), Widget->GoToAsset(Fixture.Dialog));
+	const TArray<TSoftObjectPtr<UNarrativeBasisVector>>& Axes = Model->GetQuery().Axes;
+	TestEqual(TEXT("The card's two most relevant axes are tagged"), Axes,
+		(TArray<TSoftObjectPtr<UNarrativeBasisVector>>{Fixture.Z, W}));
+	TestTrue(TEXT("A class filter that hid it is widened"), Model->GetQuery().Classes.Contains(UNarrativeDialogDef::StaticClass()));
+	TestTrue(TEXT("The entity filter is kept"), Model->GetQuery().Classes.Contains(UNarrativeEntityDef::StaticClass()));
+	TestEqual(TEXT("The content path already held it"), Model->GetQuery().ContentPath, Fixture.Root);
+	TestTrue(TEXT("The card is selected in the space"), Model->IsSelected(Fixture.Dialog));
+
+	TestTrue(TEXT("Going to a basis asset succeeds"), Widget->GoToAsset(Fixture.Y));
+	TestEqual(TEXT("A basis asset becomes X, keeping the old X as Y"), Model->GetQuery().Axes,
+		(TArray<TSoftObjectPtr<UNarrativeBasisVector>>{Fixture.Y, Fixture.Z}));
+
+	UNarrativeDataAsset* Plain = Fixture.Add<UNarrativeDataAsset>(TEXT("Plain"));
+	TestFalse(TEXT("An asset with no position cannot be gone to"), Widget->GoToAsset(Plain));
+	TestEqual(TEXT("and the query is left alone"), Model->GetQuery().Axes,
+		(TArray<TSoftObjectPtr<UNarrativeBasisVector>>{Fixture.Y, Fixture.Z}));
+
+	Fixture.Entity->StartingCoordinates.SetCoordinate(Fixture.Y, 1);
+	Fixture.Entity->StartingCoordinates.SetCoordinate(Fixture.Z, 1);
+	Model->Refresh();
+	TestEqual(TEXT("Showing several matches selects only what the axes plot"),
+		Widget->ShowAssets({Fixture.Entity, Plain, Fixture.Dialog}), 1);
 	return true;
 }
 #endif

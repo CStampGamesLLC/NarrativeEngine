@@ -165,6 +165,9 @@ public:
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
 	virtual FString GetReferencerName() const override { return TEXT("FNarrativeSpaceModel"); }
 
+	/** The colour cards of this asset class are drawn in, shared with the search bar's rows. */
+	static FLinearColor ClassColor(const UClass* Class);
+
 	/** Pure authoring operation shared by dragging and tests. Only moved axes are authored. */
 	static FVectorND Offset(const FVectorND& Original, const TArray<TSoftObjectPtr<UNarrativeBasisVector>>& Axes,
 		const FVector& Delta, int32 AxisLock, double SnapStep);

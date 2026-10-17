@@ -39,6 +39,15 @@ public:
 	/** Opens the rename box over the selection. Does nothing without a selection this tool can edit. */
 	void BeginRename();
 
+	/**
+	 * Brings the selection into view once any pending reframe has run: a lone entry is centred and
+	 * zoomed in until its card is readable, several are framed together.
+	 */
+	void FocusSelection();
+
+	/** Dims every entry outside Matches while a search holds a query. Unset shows everything as usual. */
+	void SetSearchMatches(TOptional<TSet<TWeakObjectPtr<UNarrativeDataAsset>>> Matches);
+
 	//~ Begin SWidget interface
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override { return FVector2D(800, 600); }
@@ -87,6 +96,9 @@ private:
 	bool bAddSelection = false;
 	int32 AxisLock = INDEX_NONE;
 	bool bFramePending = false;
+	bool bFocusPending = false;
+	/** What the search bar matches, while it holds a query. Everything else is drawn dimmed. */
+	TOptional<TSet<TWeakObjectPtr<UNarrativeDataAsset>>> SearchMatches;
 	ENarrativeSpaceIncomplete IncompleteDisplay = ENarrativeSpaceIncomplete::Hide;
 
 	// The rename box, while one is open, and the menu holding it.

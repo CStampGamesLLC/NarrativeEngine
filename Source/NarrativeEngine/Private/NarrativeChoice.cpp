@@ -108,7 +108,9 @@ namespace NarrativeChoice
 			Logits.Add(Beta * Terms.Utility);
 		}
 
-		// Families: w̄_g is the mean Gibbs weight of the phrasings, so an idea's weight never grows by rewording it.
+		// Families: w̄_g is the mean Gibbs weight of the phrasings in the speaker's reach, so an idea's weight never
+		// grows by rewording it, and a wording the speaker can't reach never dilutes the ones it can. A family
+		// with nothing in reach is scored on all of them, for the record; it is never dealt.
 		TMap<int32, TArray<int32>> Members;
 		for (int32 Index = 0; Index < Phrasings.Num(); ++Index)
 		{
@@ -124,18 +126,32 @@ namespace NarrativeChoice
 			Family.Family = Pair.Key;
 			Family.Phrasings = MoveTemp(Pair.Value);
 
-			TArray<double> FamilyLogits;
+			TArray<int32> Scored;
 			for (const int32 Member : Family.Phrasings)
 			{
-				FamilyLogits.Add(Logits[Member]);
 				Family.MaxSpeakerReach = FMath::Max(Family.MaxSpeakerReach, Out.Phrasings[Member].SpeakerReach);
+				if (Out.Phrasings[Member].SpeakerReach >= Params.ReachFloor)
+				{
+					Scored.Add(Member);
+				}
+			}
+			if (Scored.IsEmpty())
+			{
+				Scored = Family.Phrasings;
+			}
+
+			TArray<double> FamilyLogits;
+			for (const int32 Member : Scored)
+			{
+				FamilyLogits.Add(Logits[Member]);
 			}
 			const double LogSum = LogSumExp(FamilyLogits);
-			const double LogSize = FMath::Loge(static_cast<double>(Family.Phrasings.Num()));
+			const double LogSize = FMath::Loge(static_cast<double>(Scored.Num()));
 			Family.LogMeanWeight = LogSum - LogSize;
 			LogWeights.Add(Family.LogMeanWeight);
 
-			for (const int32 Member : Family.Phrasings)
+			// A wording outside the scored set pays no share and is never rolled.
+			for (const int32 Member : Scored)
 			{
 				Out.Phrasings[Member].FamilyLogSize = LogSize;
 				Out.Phrasings[Member].ProbabilityInFamily = FMath::Exp(Logits[Member] - LogSum);

@@ -130,6 +130,17 @@ void SNarrativeSpaceViewport::FrameAll(const bool bSelectionOnly)
 	Camera.Frame(Positions, ViewportSize);
 }
 
+void SNarrativeSpaceViewport::FocusSelection()
+{
+	// After any reframe a query change queued, or that reframe would undo this one.
+	bFocusPending = true;
+}
+
+void SNarrativeSpaceViewport::SetSearchMatches(TOptional<TSet<TWeakObjectPtr<UNarrativeDataAsset>>> Matches)
+{
+	SearchMatches = MoveTemp(Matches);
+}
+
 void SNarrativeSpaceViewport::SetView(const ENarrativeSpaceView View)
 {
 	FinishInteraction(true);
@@ -410,9 +421,15 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 			Color.A = FMath::Clamp(1.0 / (1.0 + FMath::Abs(Item.Depth) * Camera.Zoom / 600.0), 0.35, 1.0);
 		}
 
-		// Entries missing one of the plotted axes recede instead of competing with complete ones.
-		const float IncompleteFade = Item.bIncomplete && IncompleteDisplay == ENarrativeSpaceIncomplete::Dim ? DimOpacity : 1.f;
-		Color.A *= IncompleteFade;
+		// Entries missing one of the plotted axes recede instead of competing with complete ones, and so
+		// does anything a search is not matching. A cluster stays lit while any member matches.
+		const bool bSearchMiss = SearchMatches.IsSet() && !Item.Indices.ContainsByPredicate([&](const int32 Index)
+		{
+			return SearchMatches->Contains(Points[Index].Asset);
+		});
+		const float Fade = (Item.bIncomplete && IncompleteDisplay == ENarrativeSpaceIncomplete::Dim ? DimOpacity : 1.f)
+			* (bSearchMiss ? DimOpacity : 1.f);
+		Color.A *= Fade;
 
 		auto DrawReach = [&](const FVector2D& Center, double Radius, const FLinearColor& RingColor)
 		{
@@ -436,7 +453,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 			{
 				// A cluster has no single centre, so each member's ring sits on its own projection.
 				DrawReach(Item.Indices.Num() == 1 ? Item.Screen : Camera.Project(Member.Position, Size), Radius,
-					SelectedCardColor.CopyWithNewOpacity(SelectedReachOpacity * IncompleteFade));
+					SelectedCardColor.CopyWithNewOpacity(SelectedReachOpacity * Fade));
 				bSelectedReach = true;
 			}
 		}
@@ -497,7 +514,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 		for (int32 Axis = 0; Axis < AxisCount; ++Axis)
 		{
 			const FVector2D Marker = Item.Screen + Item.HalfSize - FVector2D(10 + Axis * 9, 8);
-			Box(Marker, FVector2D(6), NarrativeSpaceAxis::Color(Axis).CopyWithNewOpacity(IncompleteFade), CardLayer + 4);
+			Box(Marker, FVector2D(6), NarrativeSpaceAxis::Color(Axis).CopyWithNewOpacity(Fade), CardLayer + 4);
 			if (!(Point.PresentAxes & (1 << Axis)))
 			{
 				Box(Marker + FVector2D(1), FVector2D(4), CardInteriorColor, CardLayer + 5);
@@ -519,7 +536,7 @@ int32 SNarrativeSpaceViewport::OnPaint(const FPaintArgs& Args, const FGeometry& 
 			}
 			Text(TopLeft + FVector2D(8, 36), Coordinates, Color, CardLayer + 3);
 			Text(TopLeft + FVector2D(8, 59), Point.Asset->GetClass()->GetName(),
-				ClassTextColor.CopyWithNewOpacity(IncompleteFade), CardLayer + 3);
+				ClassTextColor.CopyWithNewOpacity(Fade), CardLayer + 3);
 		}
 	}
 
@@ -587,6 +604,26 @@ void SNarrativeSpaceViewport::Tick(const FGeometry& Geometry, double CurrentTime
 	{
 		bFramePending = false;
 		FrameAll();
+	}
+	if (bFocusPending && !bFramePending && Geometry.GetLocalSize().X > 0)
+	{
+		bFocusPending = false;
+		TArray<FVector> Positions;
+		for (const FNarrativeSpacePoint& Point : Model->GetPoints())
+		{
+			if (!IsHidden(Point) && Model->IsSelected(Point.Asset.Get())) { Positions.Add(Point.Position); }
+		}
+		if (Positions.Num() == 1)
+		{
+			// Keep the zoom the user chose unless it is too far out to read the card: the lowest zoom at
+			// which CardSize reaches the detail threshold, where cards stop clustering and get labels.
+			Camera.Center = Positions[0];
+			Camera.Zoom = FMath::Max(Camera.Zoom, 24.0 * FMath::Square(NarrativeSpaceDraw::DetailCardSize / 64.0));
+		}
+		else if (Positions.Num() > 1)
+		{
+			Camera.Frame(Positions, ViewportSize);
+		}
 	}
 }
 
@@ -956,7 +993,8 @@ FReply SNarrativeSpaceViewport::OnKeyDown(const FGeometry& Geometry, const FKeyE
 	if (Key == EKeys::Tab) { SelectNext(Event.IsShiftDown() ? -1 : 1); return FReply::Handled(); }
 	if (Key == EKeys::Delete) { DeleteSelection(); return FReply::Handled(); }
 	if (Key == EKeys::F2) { BeginRename(); return FReply::Handled(); }
-	if (Key == EKeys::F) { FrameAll(true); return FReply::Handled(); }
+	// Ctrl+F belongs to the editor's search bar.
+	if (Key == EKeys::F && !Event.IsControlDown()) { FrameAll(true); return FReply::Handled(); }
 	if (Key == EKeys::Home) { FrameAll(); return FReply::Handled(); }
 	if (Event.IsControlDown() && GEditor)
 	{

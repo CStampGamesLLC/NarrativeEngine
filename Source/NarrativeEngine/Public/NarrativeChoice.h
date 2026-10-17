@@ -11,6 +11,10 @@
  *          resonance                  relevance under the belief      stance
  *   w̄_g = mean over g of e^(β u_y),   P(g) = w̄_g / (e^(β u_∅) + Σ w̄_g'),   P(y|g) = e^(β u_y) / Σ_g e^(β u_y')
  *
+ * Local deviation from the spec: "over g" means over g's phrasings within the speaker's reach
+ * (K ≥ FParams::ReachFloor), so an unreachable rewording never drags its idea below silence. A family
+ * with nothing in reach is scored over all its phrasings, for the record only.
+ *
  * Motive (ν) and echo (ρ) stay 0 until their inputs exist (Pattern 9). Legality and directional
  * repulsion (Patterns 8, 10) are not ported yet: every card counts as legal, and the deal draws
  * families by P(g) alone.
@@ -70,13 +74,13 @@ namespace NarrativeChoice
 
 		double Utility = 0.0;
 
-		/** ln |g|, the family share every phrasing of an idea pays so rephrasings split one idea's weight. */
+		/** ln |g|, the family share every scored phrasing of an idea pays so rephrasings split one idea's weight. 0 when out of reach in a family that has one in reach. */
 		double FamilyLogSize = 0.0;
 
 		/** K_y(x_B): the speaker's own reach, gating the deal. */
 		double SpeakerReach = 0.0;
 
-		/** P(y | g) and P(g) P(y | g). */
+		/** P(y | g) and P(g) P(y | g). Both 0 for a phrasing left out of its family's scoring. */
 		double ProbabilityInFamily = 0.0;
 		double Probability = 0.0;
 	};
@@ -99,7 +103,7 @@ namespace NarrativeChoice
 		/** Indices into the evaluated phrasings, by P(y | g) descending. */
 		TArray<int32> Phrasings;
 
-		/** ln w̄_g. */
+		/** ln w̄_g, over the phrasings in reach (all of them when none is). */
 		double LogMeanWeight = 0.0;
 
 		double Probability = 0.0;
