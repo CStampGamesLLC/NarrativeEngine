@@ -10,9 +10,11 @@
  *   -run=NarrativeSchema -Save           Seed every empty mask from the axes its vector has typed,
  *                                        seed card families from their Dialog/<Family>/ folder, save.
  *   -run=NarrativeSchema -LintOnly       Lints only; exits 1 on any error (for CI).
- *   -run=NarrativeSchema -Export=Docs/NarrativeHeuristics/authored_export.json [-ExportOnly]
- *                                        Writes every axis, archetype, entity sheet and card as JSON:
- *                                        the P1 export the oracle re-calibrates authored content from.
+ *   -run=NarrativeSchema -Export=Docs/NarrativeHeuristics/authored_p0.json [-ExportOnly]
+ *                                        Writes every axis, archetype, entity sheet, card, faction and
+ *                                        faction context, the cast (actor Blueprints and the narrative
+ *                                        components they carry) and the lints, as JSON: the P0-A export
+ *                                        the oracle re-baselines authored content from (TDD App. G).
  *
  * Applying a calibrated sheet (the reference implementation's output):
  *   -ApplySheet=<EntityAsset> -Calibration=<numbers.json> -Profile=<profile>
