@@ -43,7 +43,7 @@ FString FNarrativeChoiceTrace::Describe() const
 	}
 
 	Out += FString::Printf(TEXT("  belief %s, A~ %s, P(silence) %.3f, %d cards over %d families\n"), LexToString(BeliefSource),
-		bHasReading ? *FString::Printf(TEXT("%+.3f"), Evaluation.Reading) : TEXT("none"), Evaluation.SilenceProbability, Cards.Num(), Evaluation.Families.Num());
+		bHasAffinity ? *FString::Printf(TEXT("%+.3f"), Evaluation.Affinity) : TEXT("none"), Evaluation.SilenceProbability, Cards.Num(), Evaluation.Families.Num());
 	for (int32 Slot = 0; Slot < Slots.Num(); ++Slot)
 	{
 		const NarrativeChoice::FDealSlot& Dealt = Slots[Slot];

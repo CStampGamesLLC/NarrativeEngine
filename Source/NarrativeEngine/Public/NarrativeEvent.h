@@ -206,7 +206,7 @@ struct NARRATIVEENGINE_API FNarrativeEvent
 #pragma endregion
 
 	/* A deed moves regard; a meeting, a warning or a zero-strength line doesn't. */
-	bool IsDeed() const { return Strength > 0.f && Kind != ENarrativeEventKind::Encounter && Kind != ENarrativeEventKind::WarningSeen; }
+	bool IsDeed() const;
 
 	static uint64 MakeEventId(uint8 InProducer, uint64 Sequence) { return (static_cast<uint64>(InProducer) << 56) | (Sequence & 0x00FFFFFFFFFFFFFFull); }
 

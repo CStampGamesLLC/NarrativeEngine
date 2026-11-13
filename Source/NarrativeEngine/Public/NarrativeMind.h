@@ -7,8 +7,8 @@
 #include "NarrativeVector.h"
 #include "NarrativeMind.generated.h"
 
-/** A mind's stance toward someone: the reading after the Schmitt trigger (spec §6.2). */
-UENUM()
+/** A mind's stance toward someone: the affinity after the Schmitt trigger (spec §6.2). */
+UENUM(BlueprintType)
 enum class ENarrativeStance : uint8
 {
 	None,
@@ -104,7 +104,7 @@ struct NARRATIVEENGINE_API FNarrativeTell
 	UPROPERTY()
 	int64 WarningSeenTick = 0;
 
-	/* What moved the reading across θH, for the Mind panel: the last valuation before the turn, or 0 for temper alone. */
+	/* What moved the affinity across θH, for the Mind panel: the last valuation before the turn, or 0 for temper alone. */
 	UPROPERTY()
 	uint64 CauseEventId = 0;
 
@@ -131,9 +131,9 @@ struct NARRATIVEENGINE_API FNarrativePin
 	bool IsActive(int64 Tick) const { return bParty || ThreatUntilTick >= Tick; }
 };
 
-/** What a reading was made of, for the Mind panel (TDD Pattern 25). */
+/** What an affinity was made of, for the Mind panel (TDD Pattern 25). */
 USTRUCT()
-struct NARRATIVEENGINE_API FNarrativeReadingParts
+struct NARRATIVEENGINE_API FNarrativeAffinityParts
 {
 	GENERATED_BODY()
 
@@ -202,12 +202,14 @@ struct NARRATIVEENGINE_API FNarrativeRelation
 	UPROPERTY()
 	int64 DecisionCount = 0;
 
-	/* The committed decision: reading, stance, when, and a revision every decision bumps. */
+	/* The committed decision: affinity, stance, when, and a revision every decision bumps.
+	 * Affinity is the spec and TDD's "reading" Ã (§6.1). The chain: deeds move Regard, Regard feeds Affinity, and
+	 * Affinity through the Schmitt trigger is Stance. */
 	UPROPERTY()
-	double Reading = 0.0;
+	double Affinity = 0.0;
 
 	UPROPERTY()
-	FNarrativeReadingParts Parts;
+	FNarrativeAffinityParts Parts;
 
 	UPROPERTY()
 	ENarrativeStance Stance = ENarrativeStance::None;
@@ -218,7 +220,7 @@ struct NARRATIVEENGINE_API FNarrativeRelation
 	UPROPERTY()
 	uint32 Revision = 0;
 
-	/* False until the first decision; Reading then holds the first impression's reading, for care. */
+	/* False until the first decision; Affinity then holds the first impression's affinity, for care. */
 	UPROPERTY()
 	bool bDecided = false;
 
@@ -362,7 +364,7 @@ struct NARRATIVEENGINE_API FNarrativeRelationSnapshot
 {
 	bool bMissing = true;
 	int64 AsOfTick = 0;
-	double Reading = 0.0;
+	double Affinity = 0.0;
 	ENarrativeStance Stance = ENarrativeStance::None;
 	uint32 Revision = 0;
 	bool bDecided = false;
@@ -370,4 +372,23 @@ struct NARRATIVEENGINE_API FNarrativeRelationSnapshot
 	double Regard = 0.0;
 	bool bTellActive = false;
 	bool bWarningSeen = false;
+};
+
+/**
+ * ForecastLine's answer: where a line would leave Observer's affinity toward its speaker. A forecast, not a promise:
+ * the noise sample is held at the last decision, and the next decision draws on from it.
+ */
+struct NARRATIVEENGINE_API FNarrativeAffinityForecast
+{
+	bool bValid = false;
+	/* Where things stand without the line, regard committed since the last decision included. What the line itself
+	 * changes is the difference from these; the last committed affinity may be older than an earlier line. */
+	double BaselineAffinity = 0.0;
+	ENarrativeStance BaselineStance = ENarrativeStance::None;
+	/* ΔR before the Loyalty cap. */
+	double RegardDelta = 0.0;
+	/* Regard after the line, capped: the first link of regard -> affinity -> stance. */
+	double Regard = 0.0;
+	double Affinity = 0.0;
+	ENarrativeStance Stance = ENarrativeStance::None;
 };

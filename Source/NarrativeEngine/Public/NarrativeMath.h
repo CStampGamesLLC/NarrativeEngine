@@ -10,7 +10,7 @@
  * changes, regenerate the JSON and the failing tests list what to update.
  *
  * P1 set: masked distance and cosine, the exact OU step, the Schmitt trigger, the regard rule (§8.5,
- * with mass and Loyalty), first impressions (§4.2) and the two-reading alignment (§6.1).
+ * with mass and Loyalty), first impressions (§4.2) and the two-term affinity (§6.1).
  */
 namespace NarrativeMath
 {
@@ -37,7 +37,7 @@ namespace NarrativeMath
 		/** The bands must not overlap: θH + δ < θF - δ. */
 		bool IsValid() const { return HostileThreshold + Hysteresis < FriendlyThreshold - Hysteresis; }
 
-		/** The next state from State given reading A. Direct Friendly <-> Hostile jumps are allowed. */
+		/** The next state from State given affinity A. Direct Friendly <-> Hostile jumps are allowed. */
 		int32 Update(int32 State, double A) const;
 	};
 
@@ -68,10 +68,11 @@ namespace NarrativeMath
 		double SelfWeight, TArrayView<double> OutMean);
 
 	/**
-	 * The P1 alignment reading, D = {pos, reg} (spec §6.1; TDD Pattern 18):
+	 * The P1 affinity (the spec's "reading" Ã), D = {pos, reg} (spec §6.1; TDD Pattern 18). Regard enters here as
+	 * tanh R; the result goes on to FSchmitt to become a stance:
 	 * clamp((w_pos a_pos + w_reg tanh R) / (|w_pos| + |w_reg|) + b, -1, 1). An undefined masked cosine
 	 * reads 0 and keeps its weight (calibrated fixtures depend on the fixed denominator); all-zero
 	 * weights read the clamped bias alone.
 	 */
-	NARRATIVEENGINE_API double CombineReading(double PositionReading, double Regard, double PositionWeight, double RegardWeight, double Bias);
+	NARRATIVEENGINE_API double CombineAffinity(double PositionAffinity, double Regard, double PositionWeight, double RegardWeight, double Bias);
 }

@@ -157,6 +157,11 @@ namespace
 	}
 }
 
+bool FNarrativeEvent::IsDeed() const
+{
+	return Strength > 0.f && Kind != ENarrativeEventKind::Encounter && Kind != ENarrativeEventKind::WarningSeen;
+}
+
 uint64 FNarrativeEvent::DeriveCompletionKey() const
 {
 	if (CompletionKey != 0)
@@ -531,7 +536,7 @@ void FNarrativeCampaign::CommitLayer(int64 Tick, TArrayView<FNarrativeEvent> Fac
 			continue;
 		}
 
-		// (2) Gather each recipient's observation, freezing care at the committed readings.
+		// (2) Gather each recipient's observation, freezing care at the committed affinities.
 		TArray<FNarrativeEntityId, TInlineAllocator<8>> Witnesses;
 		if (Fact.Recipients.IsEmpty())
 		{
@@ -596,12 +601,12 @@ void FNarrativeCampaign::CommitLayer(int64 Tick, TArrayView<FNarrativeEvent> Fac
 			}
 			else if (Fact.Target.IsValid())
 			{
-				// Care reads the witness's committed reading of the target, or its first impression if
+				// Care reads the witness's committed affinity of the target, or its first impression if
 				// the target is new; never the truth. An optional relation: without room, care is 0.
 				if (const FNarrativeRelation* TargetRelation = EnsureRelation(*Mind, Fact.Target, Tick, /*bRequired*/ false))
 				{
 					Reserve(Witness, Fact.Target);
-					Care = FMath::Clamp(TargetRelation->Reading, -1.0, 1.0);
+					Care = FMath::Clamp(TargetRelation->Affinity, -1.0, 1.0);
 				}
 			}
 
@@ -760,7 +765,7 @@ void FNarrativeCampaign::Decide(FNarrativeMind& Mind, FNarrativeRelation& Relati
 	AdvanceNoise(Mind, Relation, Tick);
 
 	const double RegardNow = NarrativeMath::DecayRegard(Relation.Regard, NarrativeTime::ToSeconds(Tick - Relation.RegardTick), Sheet.RegardMemory);
-	const double Reading = ComputeReading(Mind, Relation, RegardNow, Relation.Parts);
+	const double Affinity = ComputeAffinity(Mind, Relation, RegardNow, Relation.Parts);
 
 	NarrativeMath::FSchmitt Trigger;
 	Trigger.HostileThreshold = Sheet.HostileThreshold;
@@ -770,10 +775,10 @@ void FNarrativeCampaign::Decide(FNarrativeMind& Mind, FNarrativeRelation& Relati
 		*Mind.Observer.ToShortString());
 
 	const ENarrativeStance Old = Relation.Stance;
-	const ENarrativeStance New = NarrativeStance::FromSign(Trigger.Update(NarrativeStance::ToSign(Old), Reading));
+	const ENarrativeStance New = NarrativeStance::FromSign(Trigger.Update(NarrativeStance::ToSign(Old), Affinity));
 
 	const bool bFirst = !Relation.bDecided;
-	Relation.Reading = Reading;
+	Relation.Affinity = Affinity;
 	Relation.Stance = New;
 	Relation.AsOfTick = Tick;
 	Relation.bDecided = true;
@@ -781,9 +786,9 @@ void FNarrativeCampaign::Decide(FNarrativeMind& Mind, FNarrativeRelation& Relati
 	++Relation.Revision;
 	++Stats.Decisions;
 
-	UE_LOG(LogNarrativeTrace, VeryVerbose, TEXT("[%lld] %s -> %s #%lld: pos %.3f tanhR %.3f bias %.3f reading %.3f %s"),
+	UE_LOG(LogNarrativeTrace, VeryVerbose, TEXT("[%lld] %s -> %s #%lld: pos %.3f tanhR %.3f bias %.3f affinity %.3f %s"),
 		Tick, *Mind.Observer.ToShortString(), *Relation.Subject.ToShortString(), Relation.DecisionCount,
-		Relation.Parts.Position, Relation.Parts.TanhRegard, Relation.Parts.Bias, Reading, LexToString(New));
+		Relation.Parts.Position, Relation.Parts.TanhRegard, Relation.Parts.Bias, Affinity, LexToString(New));
 
 	if (New == Old)
 	{
@@ -826,8 +831,8 @@ void FNarrativeCampaign::Decide(FNarrativeMind& Mind, FNarrativeRelation& Relati
 		}
 	}
 
-	UE_LOG(LogNarrativeTrace, Verbose, TEXT("[%lld] %s -> %s: %s -> %s (reading %.3f)"), Tick, *Mind.Observer.ToShortString(),
-		*Relation.Subject.ToShortString(), LexToString(Old), LexToString(New), Reading);
+	UE_LOG(LogNarrativeTrace, Verbose, TEXT("[%lld] %s -> %s: %s -> %s (affinity %.3f)"), Tick, *Mind.Observer.ToShortString(),
+		*Relation.Subject.ToShortString(), LexToString(Old), LexToString(New), Affinity);
 }
 
 FNarrativeRelation* FNarrativeCampaign::EnsureRelation(FNarrativeMind& Mind, const FNarrativeEntityId& Subject, int64 Tick, bool bRequired)
@@ -939,11 +944,11 @@ FNarrativeRelation* FNarrativeCampaign::EnsureRelation(FNarrativeMind& Mind, con
 	Relation.PriorMean = Relation.Mean;
 	Relation.NoiseIndex = 0;
 
-	// Until its first decision, the first impression's reading serves as care.
-	Relation.Reading = ComputeReading(Mind, Relation, 0.0, Relation.Parts);
+	// Until its first decision, the first impression's affinity serves as care.
+	Relation.Affinity = ComputeAffinity(Mind, Relation, 0.0, Relation.Parts);
 
-	UE_LOG(LogNarrativeTrace, Verbose, TEXT("[%lld] %s meets %s (%s): first reading %.3f"), Tick, *Mind.Observer.ToShortString(),
-		*Subject.ToShortString(), *SubjectRecord->DisplayName, Relation.Reading);
+	UE_LOG(LogNarrativeTrace, Verbose, TEXT("[%lld] %s meets %s (%s): first affinity %.3f"), Tick, *Mind.Observer.ToShortString(),
+		*Subject.ToShortString(), *SubjectRecord->DisplayName, Relation.Affinity);
 	return &Mind.Relations.Add(Subject, MoveTemp(Relation));
 }
 
@@ -1012,7 +1017,7 @@ void FNarrativeCampaign::AdvanceNoise(const FNarrativeMind& Mind, FNarrativeRela
 	Relation.NoiseTick = Tick;
 }
 
-double FNarrativeCampaign::ComputeReading(const FNarrativeMind& Mind, const FNarrativeRelation& Relation, double RegardNow, FNarrativeReadingParts& OutParts) const
+double FNarrativeCampaign::ComputeAffinity(const FNarrativeMind& Mind, const FNarrativeRelation& Relation, double RegardNow, FNarrativeAffinityParts& OutParts) const
 {
 	const FNarrativeMindSheet& Sheet = Mind.Sheet;
 	const FNarrativeEntityRecord* Self = Entities.Find(Mind.Observer);
@@ -1037,7 +1042,7 @@ double FNarrativeCampaign::ComputeReading(const FNarrativeMind& Mind, const FNar
 	OutParts.Bias = FMath::Clamp(static_cast<double>(Sheet.Bias) + GetFactionBias(Mind.Observer, Relation.Subject), -1.0, 1.0);
 	OutParts.PositionWeight = Sheet.PositionWeight;
 	OutParts.RegardWeight = Sheet.RegardWeight;
-	return NarrativeMath::CombineReading(Position, RegardNow, Sheet.PositionWeight, Sheet.RegardWeight, OutParts.Bias);
+	return NarrativeMath::CombineAffinity(Position, RegardNow, Sheet.PositionWeight, Sheet.RegardWeight, OutParts.Bias);
 }
 
 double FNarrativeCampaign::GetFactionBias(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject) const
@@ -1126,7 +1131,7 @@ FNarrativeRelationSnapshot FNarrativeCampaign::ReadRelation(const FNarrativeEnti
 
 	Snapshot.bMissing = false;
 	Snapshot.AsOfTick = Relation->AsOfTick;
-	Snapshot.Reading = Relation->Reading;
+	Snapshot.Affinity = Relation->Affinity;
 	Snapshot.Stance = Relation->Stance;
 	Snapshot.Revision = Relation->Revision;
 	Snapshot.bDecided = Relation->bDecided;
@@ -1134,6 +1139,89 @@ FNarrativeRelationSnapshot FNarrativeCampaign::ReadRelation(const FNarrativeEnti
 	Snapshot.bTellActive = Relation->Tell.bActive;
 	Snapshot.bWarningSeen = Relation->Tell.bWarningSeen;
 	return Snapshot;
+}
+
+FNarrativeAffinityForecast FNarrativeCampaign::ForecastLine(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Speaker, double Strength, int32 Stance, const FVectorND& Location, const FNarrativeMask& Mask) const
+{
+	const FNarrativeMind* Mind = Minds.Find(Observer);
+	const FNarrativeEntityRecord* Self = Entities.Find(Observer);
+	if (!Mind || !Self)
+	{
+		return FNarrativeAffinityForecast();
+	}
+
+	FNarrativeEvent Line;
+	Line.Location = Location;
+	Line.Mask = Mask;
+
+	// The commit's own valuation (CommitLayer): Observer is the line's target, so care is 1 and the mass is its own.
+	return ForecastRegardDelta(Observer, Speaker,
+		Strength > 0.0 ? NarrativeMath::RegardDelta(Strength, Stance, 1.0, ApprovalOf(*Mind, Line), FMath::Max(1.0, static_cast<double>(Self->Mass))) : 0.0);
+}
+
+FNarrativeAffinityForecast FNarrativeCampaign::ForecastRegardDelta(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Speaker, double RegardDelta) const
+{
+	FNarrativeAffinityForecast Forecast;
+	const FNarrativeMind* Mind = Minds.Find(Observer);
+	const FNarrativeRelation* Relation = FindRelation(Observer, Speaker);
+	if (!Mind || !Relation || Observer == Speaker)
+	{
+		return Forecast;
+	}
+
+	const FNarrativeMindSheet& Sheet = Mind->Sheet;
+	Forecast.RegardDelta = RegardDelta;
+	const double RegardNow = GetRegardAtFrontier(Observer, Speaker);
+	Forecast.Regard = NarrativeMath::ClipRegard(RegardNow + Forecast.RegardDelta, Sheet.Loyalty);
+
+	// Regard -> affinity -> stance, with position and bias held at the last decision, first without the line and then with it.
+	const FNarrativeAffinityParts& Parts = Relation->Parts;
+	Forecast.BaselineAffinity = NarrativeMath::CombineAffinity(Parts.Position, RegardNow, Parts.PositionWeight, Parts.RegardWeight, Parts.Bias);
+	Forecast.Affinity = NarrativeMath::CombineAffinity(Parts.Position, Forecast.Regard, Parts.PositionWeight, Parts.RegardWeight, Parts.Bias);
+
+	NarrativeMath::FSchmitt Trigger;
+	Trigger.HostileThreshold = Sheet.HostileThreshold;
+	Trigger.FriendlyThreshold = Sheet.FriendlyThreshold;
+	Trigger.Hysteresis = Sheet.Hysteresis;
+	Forecast.BaselineStance = NarrativeStance::FromSign(Trigger.Update(NarrativeStance::ToSign(Relation->Stance), Forecast.BaselineAffinity));
+	Forecast.Stance = NarrativeStance::FromSign(Trigger.Update(NarrativeStance::ToSign(Forecast.BaselineStance), Forecast.Affinity));
+	Forecast.bValid = true;
+	return Forecast;
+}
+
+int32 FNarrativeCampaign::CountLinesToAffinity(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Speaker, double Strength, int32 Direction, double Goal) const
+{
+	const FNarrativeMind* Mind = Minds.Find(Observer);
+	const FNarrativeRelation* Relation = FindRelation(Observer, Speaker);
+	const FNarrativeEntityRecord* Self = Entities.Find(Observer);
+	if (!Mind || !Relation || !Self || Strength <= 0.0)
+	{
+		return INDEX_NONE;
+	}
+
+	auto Reached = [Direction, Goal](double Affinity) { return Direction > 0 ? Affinity >= Goal : Affinity < Goal; };
+	if (Reached(Relation->Affinity))
+	{
+		return 0;
+	}
+
+	const FNarrativeAffinityParts& Parts = Relation->Parts;
+	const double PerLine = Direction * FMath::Max(1.0, static_cast<double>(Self->Mass)) * Strength;
+	double Regard = GetRegardAtFrontier(Observer, Speaker);
+	for (int32 Lines = 1; ; ++Lines)
+	{
+		const double Next = NarrativeMath::ClipRegard(Regard + PerLine, Mind->Sheet.Loyalty);
+		// Pressed against the cap: more lines can't change anything, so this is the only true "out of reach".
+		if (Next == Regard)
+		{
+			return INDEX_NONE;
+		}
+		Regard = Next;
+		if (Reached(NarrativeMath::CombineAffinity(Parts.Position, Regard, Parts.PositionWeight, Parts.RegardWeight, Parts.Bias)))
+		{
+			return Lines;
+		}
+	}
 }
 
 const FNarrativeRelation* FNarrativeCampaign::FindRelation(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject) const
@@ -1384,7 +1472,7 @@ uint32 FNarrativeCampaign::ComputeStateHash(bool bIncludeClockDebt) const
 			int64 NoiseTick = Relation.NoiseTick;
 			int64 NoiseIndex = Relation.NoiseIndex;
 			int64 Decisions = Relation.DecisionCount;
-			double Reading = Relation.Reading;
+			double Affinity = Relation.Affinity;
 			uint8 Stance = static_cast<uint8>(Relation.Stance);
 			int64 AsOf = Relation.AsOfTick;
 			uint32 Revision = Relation.Revision;
@@ -1392,7 +1480,7 @@ uint32 FNarrativeCampaign::ComputeStateHash(bool bIncludeClockDebt) const
 			int64 Created = Relation.CreatedTick;
 			int64 Touched = Relation.LastTouchedTick;
 			int32 Flips = Relation.Flips;
-			Archive << SubjectGuid << Regard << RegardTick << NoiseTick << NoiseIndex << Decisions << Reading << Stance << AsOf << Revision
+			Archive << SubjectGuid << Regard << RegardTick << NoiseTick << NoiseIndex << Decisions << Affinity << Stance << AsOf << Revision
 				<< bDecided << Created << Touched << Flips;
 			WriteStructText(Archive, Relation.Tell);
 			WriteVector(Archive, Relation.Mean);
@@ -1483,7 +1571,7 @@ bool FNarrativeCampaign::FixtureSetBelief(const FNarrativeEntityId& Observer, co
 	Relation->PriorMean = Relation->Mean;
 	if (!Relation->bDecided)
 	{
-		Relation->Reading = ComputeReading(*Mind, *Relation, 0.0, Relation->Parts);
+		Relation->Affinity = ComputeAffinity(*Mind, *Relation, 0.0, Relation->Parts);
 	}
 	return true;
 }

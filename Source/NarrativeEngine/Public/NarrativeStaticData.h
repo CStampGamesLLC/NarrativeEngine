@@ -45,22 +45,22 @@ struct NARRATIVEENGINE_API FNarrativeMindSheet
 	TMap<TSoftObjectPtr<UArchetypeDef>, FVectorND> WorldviewOverrides;
 
 	/** w_pos: how much "are we alike?" counts. Negative for a contrarian (§6.1). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Readings")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Affinity")
 	float PositionWeight = 1.f;
 
 	/** w_reg: how much deeds count against likeness (§6.1). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Readings")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Affinity")
 	float RegardWeight = 0.6f;
 
 	/** The character's own baseline bias, summed with its faction biases and clamped (§6.1). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Readings", meta = (ClampMin = "-1", ClampMax = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Affinity", meta = (ClampMin = "-1", ClampMax = "1"))
 	float Bias = 0.f;
 
-	/** θH: below this the reading turns Hostile. How quick to anger (§6.2). */
+	/** θH: below this the affinity turns Hostile. How quick to anger (§6.2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Stance")
 	float HostileThreshold = -0.25f;
 
-	/** θF: above this the reading turns Friendly. How slow to trust (§6.2). */
+	/** θF: above this the affinity turns Friendly. How slow to trust (§6.2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Stance")
 	float FriendlyThreshold = 0.35f;
 
@@ -68,7 +68,7 @@ struct NARRATIVEENGINE_API FNarrativeMindSheet
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Stance", meta = (ClampMin = "0"))
 	float Hysteresis = 0.1f;
 
-	/** T_z, game seconds: the memory of the reading's noise. How steady (§6.2). */
+	/** T_z, game seconds: the memory of the affinity's noise. How steady (§6.2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Stance", meta = (ClampMin = "0.01", Units = "s"))
 	float NoiseMemory = 60.f;
 
@@ -96,7 +96,7 @@ struct NARRATIVEENGINE_API FNarrativeMindSheet
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Tell")
 	TSoftObjectPtr<UNarrativeDialogDef> TellCard;
 
-	/** θ per gate, read against this character's reading (Gate.Join, Gate.Obey; P2). */
+	/** θ per gate, read against this character's affinity (Gate.Join, Gate.Obey; P2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind|Gates", meta = (Categories = "Gate"))
 	TMap<FGameplayTag, float> Gates;
 

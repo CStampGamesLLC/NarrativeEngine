@@ -181,6 +181,28 @@ public:
 		TArray<double>& OutMean, TArray<double>& OutVariance, ENarrativeBeliefSource* OutSource = nullptr) const;
 
 	/**
+	 * What a line spoken to Observer by Speaker would do, by the commit's own rule (§8.5; care is 1 because Observer is
+	 * its target), run through the last decision's affinity parts. Never draws, decides or advances time. Invalid
+	 * without a relation.
+	 */
+	FNarrativeAffinityForecast ForecastLine(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Speaker, double Strength, int32 Stance,
+		const FVectorND& Location, const FNarrativeMask& Mask) const;
+
+	/**
+	 * ForecastLine's regard -> affinity -> stance chain for a regard change the caller valued itself: a player-facing
+	 * preview values the line by what the speaker believes of Observer, never by Observer's true position as ForecastLine does.
+	 */
+	FNarrativeAffinityForecast ForecastRegardDelta(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Speaker, double RegardDelta) const;
+
+	/**
+	 * How many lines of strength J, each landing fully on Observer's values (ΔR = ±m J), move its affinity toward Speaker
+	 * to Goal. Direction +1 ends at or above Goal; -1 ends strictly below it, as the Schmitt trigger's θH does. 0 when
+	 * already there; INDEX_NONE only when regard saturates at the Loyalty cap short of it. An estimate for that J: a line
+	 * off those values moves regard less (0.6 J), and a weaker or stronger card takes more or fewer lines.
+	 */
+	int32 CountLinesToAffinity(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Speaker, double Strength, int32 Direction, double Goal) const;
+
+	/**
 	 * Over every authoritative record in canonical order (TDD §7): header and counters, the frontier,
 	 * producer sequences and holds, pending facts, committed and completed ids, entities, sheets,
 	 * archetype beliefs, pins, relations with their tells, and every valued unit's identity. Inspection
@@ -249,7 +271,7 @@ private:
 	FNarrativeRelation* EnsureRelation(FNarrativeMind& Mind, const FNarrativeEntityId& Subject, int64 Tick, bool bRequired = true);
 	const FVectorND& GetArchetypeBelief(FNarrativeMind& Mind, const FNarrativeEntityRecord& Subject);
 	void AdvanceNoise(const FNarrativeMind& Mind, FNarrativeRelation& Relation, int64 Tick) const;
-	double ComputeReading(const FNarrativeMind& Mind, const FNarrativeRelation& Relation, double RegardNow, FNarrativeReadingParts& OutParts) const;
+	double ComputeAffinity(const FNarrativeMind& Mind, const FNarrativeRelation& Relation, double RegardNow, FNarrativeAffinityParts& OutParts) const;
 	double GetFactionBias(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject) const;
 	double ApprovalOf(const FNarrativeMind& Mind, const FNarrativeEvent& Fact) const;
 

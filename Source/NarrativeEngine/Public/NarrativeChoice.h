@@ -120,7 +120,7 @@ namespace NarrativeChoice
 		TArray<FFamilyScore> Families;
 
 		/** Ã_B→T as the stance term read it. */
-		double Reading = 0.0;
+		double Affinity = 0.0;
 
 		/** β u_∅, and ln(e^(β u_∅) + Σ w̄_g). */
 		double SilenceLogWeight = 0.0;
@@ -138,8 +138,8 @@ namespace NarrativeChoice
 	NARRATIVEENGINE_API double LogExpectedReachPow(TConstArrayView<double> Mean, TConstArrayView<double> Variance, TConstArrayView<double> Location,
 		double Sigma, double Power);
 
-	/** Scores every phrasing and family. Reading is Ã_B→T, the speaker's committed reading of the addressee (Pattern 18). */
-	NARRATIVEENGINE_API FEvaluation Evaluate(const FParams& Params, TConstArrayView<FPhrasing> Phrasings, double Reading);
+	/** Scores every phrasing and family. Affinity is Ã_B→T, the speaker's committed affinity of the addressee (Pattern 18). */
+	NARRATIVEENGINE_API FEvaluation Evaluate(const FParams& Params, TConstArrayView<FPhrasing> Phrasings, double Affinity);
 
 	/** Inverse CDF in the given order: the first index whose running sum exceeds U Σw. INDEX_NONE when nothing weighs anything. */
 	NARRATIVEENGINE_API int32 PickByRoll(TConstArrayView<double> Weights, double U);

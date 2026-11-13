@@ -133,11 +133,11 @@ namespace NarrativeMath
 		}
 	}
 
-	double CombineReading(double PositionReading, double Regard, double PositionWeight, double RegardWeight, double Bias)
+	double CombineAffinity(double PositionAffinity, double Regard, double PositionWeight, double RegardWeight, double Bias)
 	{
 		const double Denominator = FMath::Abs(PositionWeight) + FMath::Abs(RegardWeight);
 		const double Raw = Denominator > 0.0
-			? (PositionWeight * PositionReading + RegardWeight * FMath::Tanh(Regard)) / Denominator + Bias
+			? (PositionWeight * PositionAffinity + RegardWeight * FMath::Tanh(Regard)) / Denominator + Bias
 			: Bias;
 		return FMath::Clamp(Raw, -1.0, 1.0);
 	}

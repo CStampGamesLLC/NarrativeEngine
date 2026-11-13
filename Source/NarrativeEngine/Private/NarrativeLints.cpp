@@ -40,7 +40,7 @@ namespace NarrativeLints
 				else if (Seen.Contains(Axis.ToSoftObjectPath()))
 				{
 					Add(OutIssues, TEXT("L13"), ENarrativeLintSeverity::Error, Asset,
-						FString::Printf(TEXT("Mask lists %s twice: it would weigh double in every reading."), *AxisName(Axis)));
+						FString::Printf(TEXT("Mask lists %s twice: it would weigh double in every affinity."), *AxisName(Axis)));
 				}
 				else
 				{
@@ -229,9 +229,9 @@ namespace NarrativeLints
 
 		if (Entity.Mind.bHasMind && Entity.Mind.PositionWeight == 0.f && Entity.Mind.RegardWeight == 0.f)
 		{
-			// L8: with no reading weighted, the stance is the clamped bias alone, fixed forever.
+			// L8: with no affinity weighted, the stance is the clamped bias alone, fixed forever.
 			Add(OutIssues, TEXT("L8"), ENarrativeLintSeverity::Warning, Entity,
-				TEXT("Both reading weights are 0: this mind reads only its bias, so its stance never moves."));
+				TEXT("Both affinity weights are 0: this mind reads only its bias, so its stance never moves."));
 		}
 
 		if (Entity.Mind.bHasMind && Entity.Mind.Loyalty <= 0.f)

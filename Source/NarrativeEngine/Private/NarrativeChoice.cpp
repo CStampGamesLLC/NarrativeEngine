@@ -74,10 +74,10 @@ namespace NarrativeChoice
 		return -0.5 * LogDet - Quadratic;
 	}
 
-	FEvaluation Evaluate(const FParams& Params, TConstArrayView<FPhrasing> Phrasings, double Reading)
+	FEvaluation Evaluate(const FParams& Params, TConstArrayView<FPhrasing> Phrasings, double Affinity)
 	{
 		FEvaluation Out;
-		Out.Reading = Reading;
+		Out.Affinity = Affinity;
 		const double Beta = FMath::Max(Params.Beta, UE_DOUBLE_SMALL_NUMBER);
 
 		// Utilities, term by term.
@@ -103,7 +103,7 @@ namespace NarrativeChoice
 			Terms.BeliefMeanVariance = In.BeliefVariance.IsEmpty() ? 0.0 : VarianceSum / In.BeliefVariance.Num();
 			Terms.Relevance = LogExpectedReachPow(In.BeliefMean, In.BeliefVariance, In.Location, In.Sigma, Beta * Params.Eta) / Beta;
 
-			Terms.StanceTerm = Params.Lambda * In.Stance * Reading;
+			Terms.StanceTerm = Params.Lambda * In.Stance * Affinity;
 			Terms.Utility = Terms.Resonance + Terms.Relevance + Terms.StanceTerm;
 			Logits.Add(Beta * Terms.Utility);
 		}

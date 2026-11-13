@@ -42,8 +42,8 @@ struct NARRATIVEENGINE_API FNarrativeChoiceTrace
 
 	ENarrativeBeliefSource BeliefSource = ENarrativeBeliefSource::FirstImpression;
 
-	/** Whether the stance term had a committed reading to read; without one Ã reads 0. */
-	bool bHasReading = false;
+	/** Whether the stance term had a committed affinity to read; without one Ã reads 0. */
+	bool bHasAffinity = false;
 
 	NarrativeChoice::FParams Params;
 	int32 HandSize = 0;
