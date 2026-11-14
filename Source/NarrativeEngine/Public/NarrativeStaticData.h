@@ -192,6 +192,53 @@ public:
 	NARRATIVE_DATA_HELPERS(UArchetypeDef)
 };
 
+/**
+ * A located thing a dialog card's wild card can name: "Care for a cup of {Item.Consumable}?" draws one
+ * subject whose SubjectTag matches the token. Which one is the choice rule's call, the same rule that
+ * chose the card (NarrativeChoice::PickSubject): a subject near the speaker's own traits resonates, one
+ * near what the speaker believes of the addressee is relevant, and its reach decides how near is near.
+ *
+ * Abstract: the game derives concrete subjects (UItemAsset) and says how wide each one reaches.
+ */
+UCLASS(Abstract)
+class NARRATIVEENGINE_API UNarrativeSubjectDef : public UNarrativeDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	/** What wild cards find this by. A token selects every subject whose tag matches it, parents included:
+	 *  {Item.Equipable} draws from every equipable, {Item.Consumable.Coffee} from coffees alone. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+	FGameplayTag SubjectTag;
+
+	/** l: where this subject sits in the space. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+	FVectorND Location;
+
+	/** The axes this subject is about. Blank reads its typed axes, as a card's does (L13). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+	FNarrativeMask Mask;
+
+	/** σ: how far from its location this subject still resonates, and so how specific it is. */
+	virtual float GetSubjectReach() const { return 5.f; }
+
+	/** The name the space editor and the choice trace show. */
+	virtual FText GetSubjectDisplayName() const { return FText::FromName(GetFName()); }
+
+#if WITH_EDITOR
+	virtual FName GetSpacePlacementProperty() const override { return GET_MEMBER_NAME_CHECKED(UNarrativeSubjectDef, Location); }
+	virtual FName GetSpaceMaskProperty() const override { return GET_MEMBER_NAME_CHECKED(UNarrativeSubjectDef, Mask); }
+	virtual FText GetSpaceLabel() const override
+	{
+		const FText Name = GetSubjectDisplayName();
+		return Name.IsEmpty() ? Super::GetSpaceLabel() : Name;
+	}
+	virtual float GetSpaceRadius() const override { return GetSubjectReach(); }
+#endif
+
+	NARRATIVE_DATA_HELPERS(UNarrativeSubjectDef)
+};
+
 UCLASS()
 class NARRATIVEENGINE_API UNarrativeActionDef : public UNarrativeDataAsset
 {

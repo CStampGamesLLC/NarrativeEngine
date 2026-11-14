@@ -185,4 +185,33 @@ namespace NarrativeChoice
 	 * family that barely beats it is said only about half the time. Lanes 0 and 1, as for a hand's first card.
 	 */
 	NARRATIVEENGINE_API FDealSlot Reply(const FEvaluation& Evaluation, TFunctionRef<double(uint64 Lane)> Uniform);
+
+	/** A wild card's draw: which subject filled it, and the weights the roll ran over. */
+	struct FSubjectPick
+	{
+		/** Index into the candidates, or INDEX_NONE when there were none. */
+		int32 Index = INDEX_NONE;
+
+		/** e^(β u) per candidate, 0 for one left out because others were in reach. */
+		TArray<double> Weights;
+
+		/** Whether the roll ran over candidates in the speaker's reach, rather than over all of them because none was. */
+		bool bInReach = false;
+
+		double Roll = 0.0;
+
+		/** Each candidate scored as its own idea with no stance, for the terms behind the weights. */
+		FEvaluation Evaluation;
+	};
+
+	/**
+	 * Fills a wild card on a card already dealt (Pattern 9, applied to what the card names rather than
+	 * to the card): u = resonance with the speaker + relevance under the speaker's belief about the
+	 * addressee. Stance and silence take no part; the card already carries one and ruled out the other.
+	 * Candidates' Family and Stance are ignored.
+	 *
+	 * The roll runs over e^(β u) of the candidates in the speaker's reach (K ≥ ReachFloor), or over all of
+	 * them when none is: the card is already said, so its blank is always filled.
+	 */
+	NARRATIVEENGINE_API FSubjectPick PickSubject(const FParams& Params, TConstArrayView<FPhrasing> Candidates, double U);
 }

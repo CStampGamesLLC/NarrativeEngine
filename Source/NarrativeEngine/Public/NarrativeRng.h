@@ -11,6 +11,8 @@ enum class ENarrativeRngPurpose : uint8
 	Witness = 3,
 	Opportunity = 4,
 	Sample = 5,
+	/** Filling a dealt card's wild cards with subjects (NarrativeChoice::PickSubject). */
+	WildCard = 6,
 };
 
 /**

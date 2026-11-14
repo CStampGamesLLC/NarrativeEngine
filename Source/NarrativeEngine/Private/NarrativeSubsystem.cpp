@@ -43,6 +43,7 @@ static TArray<UClass*> NarrativeAssetTypes()
 		UNarrativeEventDef::StaticClass(),
 		UNarrativeDialogDef::StaticClass(),
 		UArchetypeDef::StaticClass(),
+		UNarrativeSubjectDef::StaticClass(),
 	};
 }
 

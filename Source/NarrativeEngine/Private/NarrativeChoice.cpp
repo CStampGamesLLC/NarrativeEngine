@@ -292,4 +292,47 @@ namespace NarrativeChoice
 		PickPhrasing(Evaluation, Said, Uniform(1));
 		return Said;
 	}
+
+	FSubjectPick PickSubject(const FParams& Params, TConstArrayView<FPhrasing> Candidates, double U)
+	{
+		FSubjectPick Out;
+		Out.Roll = U;
+		if (Candidates.IsEmpty())
+		{
+			return Out;
+		}
+
+		// Each subject is its own idea with no stance, so u is resonance + relevance alone.
+		TArray<FPhrasing> Scored(Candidates.GetData(), Candidates.Num());
+		for (int32 Index = 0; Index < Scored.Num(); ++Index)
+		{
+			Scored[Index].Family = Index;
+			Scored[Index].Stance = 0.0;
+		}
+		Out.Evaluation = Evaluate(Params, Scored, 0.0);
+
+		const double Beta = FMath::Max(Params.Beta, UE_DOUBLE_SMALL_NUMBER);
+		double MaxLogit = -TNumericLimits<double>::Max();
+		for (const FPhrasingTerms& Terms : Out.Evaluation.Phrasings)
+		{
+			Out.bInReach |= Terms.SpeakerReach >= Params.ReachFloor;
+		}
+		for (const FPhrasingTerms& Terms : Out.Evaluation.Phrasings)
+		{
+			if (!Out.bInReach || Terms.SpeakerReach >= Params.ReachFloor)
+			{
+				MaxLogit = FMath::Max(MaxLogit, Beta * Terms.Utility);
+			}
+		}
+
+		// Relative to the best, so a far-off field of candidates doesn't underflow to nothing.
+		Out.Weights.Reserve(Scored.Num());
+		for (const FPhrasingTerms& Terms : Out.Evaluation.Phrasings)
+		{
+			const bool bCounted = !Out.bInReach || Terms.SpeakerReach >= Params.ReachFloor;
+			Out.Weights.Add(bCounted ? FMath::Exp(Beta * Terms.Utility - MaxLogit) : 0.0);
+		}
+		Out.Index = PickByRoll(Out.Weights, U);
+		return Out;
+	}
 }
