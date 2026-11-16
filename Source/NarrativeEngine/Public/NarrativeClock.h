@@ -93,6 +93,7 @@ struct NARRATIVEENGINE_API FNarrativeClock
 
 	/** New game: back to tick zero, nothing held, nothing committed. */
 	void Reset();
+	void SerializeCheckpoint(FArchive& Archive);
 
 	static constexpr int32 NumProducers = static_cast<int32>(ENarrativeProducer::Num);
 	static bool IsValidProducer(ENarrativeProducer Producer) { return static_cast<int32>(Producer) < NumProducers; }

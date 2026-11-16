@@ -231,6 +231,14 @@ public:
 	 * frontier, so it is left out unless asked for.
 	 */
 	uint32 ComputeStateHash(bool bIncludeClockDebt = false) const;
+	/* Versioned domain checkpoint. Import validates a temporary campaign before replacing truth;
+	 * view bindings and subscribers are owned outside this payload and remain intact. */
+	bool ExportCheckpoint(TArray<uint8>& Bytes) const;
+	bool ImportCheckpoint(const TArray<uint8>& Bytes, FString& Error);
+	bool IsCommitting() const
+	{
+		return bPumping;
+	}
 #pragma endregion
 
 #pragma region Dialog
@@ -293,6 +301,7 @@ public:
 	FOnNarrativeEventCommitted OnEventCommitted;
 
 private:
+	void SerializeCheckpoint(FArchive& Archive);
 	FNarrativeMind& AddMind(const FNarrativeEntityId& Observer, const FNarrativeMindSheet& Sheet);
 	void ScheduleFirstDecision(FNarrativeMind& Mind) const;
 
@@ -310,10 +319,12 @@ private:
 	 * progress has reserved. An optional relation (a meeting) is refused once protected relations fill
 	 * their budget; a required one (a deed's witness, a pin) never is while anything can be forgotten.
 	 */
-	FNarrativeRelation* EnsureRelation(FNarrativeMind& Mind, const FNarrativeEntityId& Subject, int64 Tick, bool bRequired = true);
+	FNarrativeRelation* EnsureRelation(FNarrativeMind& Mind, const FNarrativeEntityId& Subject, int64 Tick,
+									   bool bRequired = true);
 	const FVectorND& GetArchetypeBelief(FNarrativeMind& Mind, const FNarrativeEntityRecord& Subject);
 	void AdvanceNoise(const FNarrativeMind& Mind, FNarrativeRelation& Relation, int64 Tick) const;
-	double ComputeAffinity(const FNarrativeMind& Mind, const FNarrativeRelation& Relation, double RegardNow, FNarrativeAffinityParts& OutParts) const;
+	double ComputeAffinity(const FNarrativeMind& Mind, const FNarrativeRelation& Relation, double RegardNow,
+						   FNarrativeAffinityParts& OutParts) const;
 	double GetFactionBias(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Subject) const;
 	double ApprovalOf(const FNarrativeMind& Mind, const FNarrativeEvent& Fact) const;
 

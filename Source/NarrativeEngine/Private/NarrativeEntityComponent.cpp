@@ -79,6 +79,31 @@ FNarrativeEntityId UNarrativeEntityComponent::ResolveEntityId(FNarrativeStore& S
 	return Store.Campaign.AllocateRuntimeId();
 }
 
+void UNarrativeEntityComponent::RestoreIdentity(const FNarrativeEntityId& Id)
+{
+	if (!Id.IsValid())
+	{
+		return;
+	}
+	PersistentSpawnId = Id.Guid;
+	if (!HasBegunPlay())
+	{
+		return;
+	}
+	if (auto* Store = UNarrativeStoreSubsystem::Find(this))
+	{
+		Store->Views.Unbind(EntityId, *GetOwner());
+		if (Store->Views.Bind(Id, *GetOwner()))
+		{
+			EntityId = Id;
+			if (EntityDef.IsValid())
+			{
+				Store->Campaign.RegisterEntity(Id, *EntityDef);
+			}
+		}
+	}
+}
+
 void UNarrativeEntityComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// Only the view detaches: the entity, its mind and everything it remembers stay in the store.

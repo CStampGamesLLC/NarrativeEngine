@@ -48,6 +48,8 @@ public:
 
 	/* This actor's campaign entity, once bound; invalid when the store refused it as a duplicate. */
 	const FNarrativeEntityId& GetEntityId() const { return EntityId; }
+	/* Rebind a saved view without allocating another campaign entity. Safe before BeginPlay. */
+	void RestoreIdentity(const FNarrativeEntityId& Id);
 
 	FVectorND GetLocation() const;
 	FVectorND GetOldLocation() const;

@@ -21,6 +21,20 @@ FNarrativeClock::FNarrativeClock()
 	Reset();
 }
 
+void FNarrativeClock::SerializeCheckpoint(FArchive& Ar)
+{
+	Ar << Horizon << Remainder << Frontier << MaxLagTicks;
+	for (int32 Index = 0; Index < NumProducers; ++Index)
+	{
+		Ar << Watermarks[Index] << Held[Index] << Sequences[Index];
+	}
+	if (Ar.IsLoading() && (Horizon < 0 || Frontier < -1 || Frontier >= Horizon || !FMath::IsFinite(Remainder) ||
+						   Remainder < 0.0 || Remainder >= 0.0011))
+	{
+		Ar.SetError();
+	}
+}
+
 int32 FNarrativeClock::ToIndex(ENarrativeProducer Producer)
 {
 	return ensureMsgf(IsValidProducer(Producer), TEXT("Invalid narrative producer %d."), static_cast<int32>(Producer))
