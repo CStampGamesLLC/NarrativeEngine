@@ -13,6 +13,8 @@ enum class ENarrativeRngPurpose : uint8
 	Sample = 5,
 	/** Filling a dealt card's wild cards with subjects (NarrativeChoice::PickSubject). */
 	WildCard = 6,
+	/** A reply's real-time presentation delay (TDD D4): the same on replay. */
+	ReplyDelay = 7,
 };
 
 /**

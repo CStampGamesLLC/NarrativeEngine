@@ -34,6 +34,8 @@ enum class ENarrativeEventKind : uint8
 	Encounter,
 	/* The warning before a social strike finished playing where it could be seen (TDD Pattern 17). */
 	WarningSeen,
+	/* An explicit Silence: the speaker chose to say nothing (D6). J = 0 always: it moves no regard, and it is the outcome P2 learns from. */
+	Silence,
 };
 
 UENUM()

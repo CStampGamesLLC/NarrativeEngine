@@ -29,6 +29,7 @@ const TCHAR* LexToString(ENarrativeEventKind Kind)
 	case ENarrativeEventKind::Death: return TEXT("Death");
 	case ENarrativeEventKind::Encounter: return TEXT("Encounter");
 	case ENarrativeEventKind::WarningSeen: return TEXT("WarningSeen");
+	case ENarrativeEventKind::Silence: return TEXT("Silence");
 	default: return TEXT("?");
 	}
 }
@@ -159,7 +160,7 @@ namespace
 
 bool FNarrativeEvent::IsDeed() const
 {
-	return Strength > 0.f && Kind != ENarrativeEventKind::Encounter && Kind != ENarrativeEventKind::WarningSeen;
+	return Strength > 0.f && Kind != ENarrativeEventKind::Encounter && Kind != ENarrativeEventKind::WarningSeen && Kind != ENarrativeEventKind::Silence;
 }
 
 uint64 FNarrativeEvent::DeriveCompletionKey() const
@@ -204,7 +205,69 @@ void FNarrativeCampaign::Reset(uint64 Seed)
 	StanceNotices.Reset();
 	TellNotices.Reset();
 	CommittedNotices.Reset();
+	DialogPairs.Reset();
 }
+
+#pragma region Dialog
+uint64 FNarrativeCampaign::TakeOpportunity(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee)
+{
+	return DialogPairs.FindOrAdd(MakeTuple(Speaker, Addressee)).Opportunities++;
+}
+
+uint64 FNarrativeCampaign::PeekOpportunity(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee) const
+{
+	const FNarrativeDialogPairState* Pair = DialogPairs.Find(MakeTuple(Speaker, Addressee));
+	return Pair ? Pair->Opportunities : 0;
+}
+
+int32 FNarrativeCampaign::CountRecentOffers(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee, FName Family, int32 Window) const
+{
+	const FNarrativeDialogPairState* Pair = DialogPairs.Find(MakeTuple(Speaker, Addressee));
+	if (!Pair || Window <= 0)
+	{
+		return 0;
+	}
+	int32 Count = 0;
+	for (int32 Index = FMath::Max(0, Pair->RecentOffers.Num() - Window); Index < Pair->RecentOffers.Num(); ++Index)
+	{
+		Count += Pair->RecentOffers[Index].Contains(Family) ? 1 : 0;
+	}
+	return Count;
+}
+
+void FNarrativeCampaign::RecordOffer(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee, const TArray<FName>& Families)
+{
+	FNarrativeDialogPairState& Pair = DialogPairs.FindOrAdd(MakeTuple(Speaker, Addressee));
+	Pair.RecentOffers.Add(Families);
+	if (Pair.RecentOffers.Num() > FNarrativeDialogPairState::MaxRemembered)
+	{
+		Pair.RecentOffers.RemoveAt(0, Pair.RecentOffers.Num() - FNarrativeDialogPairState::MaxRemembered);
+	}
+}
+
+bool FNarrativeCampaign::AdvanceBeat(double Seconds, FString* OutHeldBy)
+{
+	// A beat never seals past a hold (TDD Pattern 27): a producer that still owes a tick stops it, and says so.
+	for (int32 Index = 0; Index < FNarrativeClock::NumProducers; ++Index)
+	{
+		const ENarrativeProducer Producer = static_cast<ENarrativeProducer>(Index);
+		if (Clock.IsHeld(Producer))
+		{
+			if (OutHeldBy)
+			{
+				*OutHeldBy = LexToString(Producer);
+			}
+			++Stats.HeldBeats;
+			return false;
+		}
+	}
+
+	Clock.Advance(FMath::Max(0.0, Seconds));
+	Pump();
+	++Stats.Beats;
+	return true;
+}
+#pragma endregion
 
 #pragma region Entities
 FNarrativeEntityId FNarrativeCampaign::AllocateRuntimeId()
@@ -1397,6 +1460,33 @@ uint32 FNarrativeCampaign::ComputeStateHash(bool bIncludeClockDebt) const
 			FString B = Key.Value.ToString();
 			double Bias = FactionBiases.FindChecked(Key);
 			Archive << A << B << Bias;
+		}
+	}
+
+	// Dialog pairs: opportunity counters key every future hand and reply; novelty memory shapes every future Offer.
+	{
+		TArray<TTuple<FNarrativeEntityId, FNarrativeEntityId>> Pairs;
+		DialogPairs.GetKeys(Pairs);
+		Pairs.Sort([](const TTuple<FNarrativeEntityId, FNarrativeEntityId>& A, const TTuple<FNarrativeEntityId, FNarrativeEntityId>& B)
+		{
+			return A.Key != B.Key ? A.Key.Guid < B.Key.Guid : A.Value.Guid < B.Value.Guid;
+		});
+		for (const TTuple<FNarrativeEntityId, FNarrativeEntityId>& Key : Pairs)
+		{
+			const FNarrativeDialogPairState& Pair = DialogPairs.FindChecked(Key);
+			FGuid Speaker = Key.Key.Guid;
+			FGuid Addressee = Key.Value.Guid;
+			uint64 Opportunities = Pair.Opportunities;
+			Archive << Speaker << Addressee << Opportunities;
+			for (const TArray<FName>& Offer : Pair.RecentOffers)
+			{
+				TArray<FString> Names;
+				for (const FName& Family : Offer)
+				{
+					Names.Add(Family.ToString());
+				}
+				Archive << Names;
+			}
 		}
 	}
 

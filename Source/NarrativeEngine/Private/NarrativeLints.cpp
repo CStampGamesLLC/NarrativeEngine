@@ -48,6 +48,16 @@ namespace NarrativeLints
 				}
 			}
 
+			// CO-C14: an axis the mask reads must have a typed coordinate, or every gather reads an accidental 0 there.
+			for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : Mask.Axes)
+			{
+				if (!Axis.IsNull() && !Vector.GetBasis().Contains(Axis))
+				{
+					Add(OutIssues, TEXT("C14"), ENarrativeLintSeverity::Error, Asset,
+						FString::Printf(TEXT("The mask reads %s, which has no coordinate: type one (0 if neutral) or drop the axis."), *AxisName(Axis)));
+				}
+			}
+
 			if (Mask.IsEmpty())
 			{
 				Add(OutIssues, TEXT("L13"), ENarrativeLintSeverity::Error, Asset,
@@ -131,6 +141,15 @@ namespace NarrativeLints
 		return FMath::Min(TierCap, 1.8 / Sigma);
 	}
 
+	FTierInfo TierOf(double Sigma)
+	{
+		FTierInfo Info;
+		Info.Tier = TierForReach(Sigma);
+		Info.Effort = static_cast<int32>(Info.Tier) + 1;
+		Info.StrengthCap = StrengthCap(FMath::Max(Sigma, UE_DOUBLE_SMALL_NUMBER));
+		return Info;
+	}
+
 	bool AreStanceBandsValid(const FNarrativeMindSheet& Sheet)
 	{
 		return Sheet.HostileThreshold + Sheet.Hysteresis < Sheet.FriendlyThreshold - Sheet.Hysteresis;
@@ -181,17 +200,168 @@ namespace NarrativeLints
 				{
 					Add(OutIssues, TEXT("L14"), ENarrativeLintSeverity::Error, Card, TEXT("A gift with h = -1: giving is done to friends."));
 				}
-				if (Card.Strength > 0.f)
+				// Pattern 11 (P0-L): a gift's J is valued on its transfer, once, as the line's child; the line itself carries 0.
+				if (Card.Strength <= 0.f)
 				{
-					Add(OutIssues, TEXT("L14"), ENarrativeLintSeverity::Warning, Card, FString::Printf(
-						TEXT("J %.2f on the offer: a gift's regard comes from its completed transfer (db.Narrative.Outcome.GiftStrength), so J here values it even when nothing changes hands."),
-						Card.Strength));
+					Add(OutIssues, TEXT("L14"), ENarrativeLintSeverity::Warning, Card,
+						TEXT("A gift with J = 0: its transfer carries the card's J (Pattern 11), so this gift is worth nothing to the receiver."));
 				}
 			}
 			else if (Mechanic == TEXT("Recruit") && Card.Strength > 0.f)
 			{
 				Add(OutIssues, TEXT("L14"), ENarrativeLintSeverity::Warning, Card,
 					FString::Printf(TEXT("J %.2f on the ask: an invitation is a request (J = 0); its ability runs the join."), Card.Strength));
+			}
+		}
+	}
+
+	FString FamilyHash(const FGameplayTag& Family, TConstArrayView<const UNarrativeDialogDef*> Cards)
+	{
+		TArray<const UNarrativeDialogDef*> Members;
+		for (const UNarrativeDialogDef* Card : Cards)
+		{
+			if (Card && Card->Family == Family)
+			{
+				Members.Add(Card);
+			}
+		}
+		Members.Sort([](const UNarrativeDialogDef& A, const UNarrativeDialogDef& B) { return A.GetPathName() < B.GetPathName(); });
+		FString Signature = Family.ToString();
+		for (const UNarrativeDialogDef* Card : Members)
+		{
+			Signature += FString::Printf(TEXT("|%s|%s|%.4f|%.4f|%d|%s"), *Card->GetPathName(), *Card->Phrase.ToString(), Card->SpaceSigma, Card->Strength, Card->Stance,
+				*Card->AbilityTags.ToStringSimple());
+			for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : Card->Mask.Axes)
+			{
+				Signature += FString::Printf(TEXT(",%s=%.3f"), *AxisName(Axis), Card->Location.GetCoordinate(Axis));
+			}
+		}
+		return FString::Printf(TEXT("%08x"), FCrc::StrCrc32(*Signature));
+	}
+
+	void LintCatalog(TConstArrayView<const UNarrativeDialogDef*> Cards, TArray<FNarrativeLintIssue>& OutIssues)
+	{
+		TMap<FGameplayTag, TArray<const UNarrativeDialogDef*>> Families;
+		for (const UNarrativeDialogDef* Card : Cards)
+		{
+			if (Card && Card->Family.IsValid())
+			{
+				Families.FindOrAdd(Card->Family).Add(Card);
+			}
+		}
+		for (TPair<FGameplayTag, TArray<const UNarrativeDialogDef*>>& Pair : Families)
+		{
+			Pair.Value.Sort([](const UNarrativeDialogDef& A, const UNarrativeDialogDef& B) { return A.GetPathName() < B.GetPathName(); });
+		}
+
+		auto SameMask = [](const FNarrativeMask& A, const FNarrativeMask& B)
+		{
+			if (A.Num() != B.Num())
+			{
+				return false;
+			}
+			for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : A.Axes)
+			{
+				if (!B.Contains(Axis))
+				{
+					return false;
+				}
+			}
+			return true;
+		};
+		auto MaskDistance = [](const UNarrativeDialogDef& A, const UNarrativeDialogDef& B)
+		{
+			double Sum = 0.0;
+			for (const TSoftObjectPtr<UNarrativeBasisVector>& Axis : A.Mask.Axes)
+			{
+				Sum += FMath::Square(A.Location.GetCoordinate(Axis) - B.Location.GetCoordinate(Axis));
+			}
+			return FMath::Sqrt(Sum);
+		};
+
+		// L10: one family, one idea. Phrasings agree in mask, h, mechanic and tier; an author has signed it.
+		for (const TPair<FGameplayTag, TArray<const UNarrativeDialogDef*>>& Pair : Families)
+		{
+			const TArray<const UNarrativeDialogDef*>& Members = Pair.Value;
+			const UNarrativeDialogDef& Lead = *Members[0];
+			int32 MinTier = TNumericLimits<int32>::Max();
+			int32 MaxTier = 0;
+			for (const UNarrativeDialogDef* Card : Members)
+			{
+				const int32 Tier = static_cast<int32>(TierForReach(Card->SpaceSigma));
+				MinTier = FMath::Min(MinTier, Tier);
+				MaxTier = FMath::Max(MaxTier, Tier);
+				if (Card == &Lead)
+				{
+					continue;
+				}
+				if (!SameMask(Card->Mask, Lead.Mask))
+				{
+					Add(OutIssues, TEXT("L10"), ENarrativeLintSeverity::Error, *Card, FString::Printf(TEXT("%s: its mask differs from %s's. One family is one idea on one set of axes."),
+						*Pair.Key.ToString(), *Lead.GetName()));
+				}
+				if ((Card->Strength > 0.f ? FMath::Sign(Card->Stance) : 0) != (Lead.Strength > 0.f ? FMath::Sign(Lead.Stance) : 0))
+				{
+					Add(OutIssues, TEXT("L10"), ENarrativeLintSeverity::Error, *Card, FString::Printf(TEXT("%s: it pushes the other way from %s (h, or J = 0). A mixed family is never reserved."),
+						*Pair.Key.ToString(), *Lead.GetName()));
+				}
+				if (Card->IsMechanic() != Lead.IsMechanic() || Card->GetOutcomePolicy() != Lead.GetOutcomePolicy())
+				{
+					Add(OutIssues, TEXT("L10"), ENarrativeLintSeverity::Error, *Card, FString::Printf(TEXT("%s: its mechanic differs from %s's."), *Pair.Key.ToString(), *Lead.GetName()));
+				}
+			}
+			if (MaxTier - MinTier > 1)
+			{
+				Add(OutIssues, TEXT("L10"), ENarrativeLintSeverity::Error, Lead, FString::Printf(TEXT("%s spans %s to %s: phrasings of one idea sit within one tier of each other."),
+					*Pair.Key.ToString(), LexToString(static_cast<ENarrativeTier>(MinTier)), LexToString(static_cast<ENarrativeTier>(MaxTier))));
+			}
+			else if (MaxTier != MinTier)
+			{
+				Add(OutIssues, TEXT("L10"), ENarrativeLintSeverity::Warning, Lead, FString::Printf(TEXT("%s spans two tiers: its phrasings cost different Effort."), *Pair.Key.ToString()));
+			}
+
+			const FString Hash = FamilyHash(Pair.Key, Cards);
+			const UNarrativeFamilyDef* Def = UNarrativeFamilyDef::Find(Pair.Key);
+			if (!Def || !Def->SignOff.IsSigned())
+			{
+				Add(OutIssues, TEXT("L10"), ENarrativeLintSeverity::Warning, Lead, FString::Printf(
+					TEXT("%s has no author sign-off: confirm its %d phrasing(s) mean the same, then sign it in a UNarrativeFamilyDef with CatalogHash %s."),
+					*Pair.Key.ToString(), Members.Num(), *Hash));
+			}
+			else if (Def->SignOff.CatalogHash != Hash)
+			{
+				Add(OutIssues, TEXT("L10"), ENarrativeLintSeverity::Warning, *Def, FString::Printf(
+					TEXT("%s changed since %s signed it (%s): review it and sign %s."), *Pair.Key.ToString(), *Def->SignOff.Author, *Def->SignOff.CatalogHash, *Hash));
+			}
+		}
+
+		// L5: two families with phrasings that coincide in location and mask are one idea named twice.
+		TArray<FGameplayTag> Keys;
+		Families.GetKeys(Keys);
+		Keys.Sort([](const FGameplayTag& A, const FGameplayTag& B) { return A.ToString() < B.ToString(); });
+		for (int32 I = 0; I < Keys.Num(); ++I)
+		{
+			for (int32 J = I + 1; J < Keys.Num(); ++J)
+			{
+				for (const UNarrativeDialogDef* A : Families[Keys[I]])
+				{
+					const UNarrativeDialogDef* Twin = nullptr;
+					for (const UNarrativeDialogDef* B : Families[Keys[J]])
+					{
+						if (!A->Mask.IsEmpty() && SameMask(A->Mask, B->Mask) && A->Stance == B->Stance && MaskDistance(*A, *B) < 0.5)
+						{
+							Twin = B;
+							break;
+						}
+					}
+					if (Twin)
+					{
+						Add(OutIssues, TEXT("L5"), ENarrativeLintSeverity::Warning, *A, FString::Printf(
+							TEXT("%s and %s (%s) sit together on one mask: one idea named twice? Merge the families or move one."),
+							*Keys[I].ToString(), *Keys[J].ToString(), *Twin->GetName()));
+						break;
+					}
+				}
 			}
 		}
 	}

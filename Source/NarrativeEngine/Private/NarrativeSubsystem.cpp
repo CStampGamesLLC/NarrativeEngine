@@ -44,6 +44,7 @@ static TArray<UClass*> NarrativeAssetTypes()
 		UNarrativeDialogDef::StaticClass(),
 		UArchetypeDef::StaticClass(),
 		UNarrativeSubjectDef::StaticClass(),
+		UNarrativeFamilyDef::StaticClass(),
 	};
 }
 
@@ -482,7 +483,105 @@ void UNarrativeSubsystem::RefreshCampaignsFromAsset(const UNarrativeEntityDef& I
 		}
 	}
 }
+#endif
+#pragma endregion
 
+// Runtime: the dealer, legality and lints call these in every build, so they stay outside WITH_EDITOR.
+#pragma region Dialog Card Policy
+bool FNarrativeRepertoire::Grants(const UNarrativeDialogDef& Card) const
+{
+	const FSoftObjectPath Path(&Card);
+	auto Lists = [&Path](const TArray<TSoftObjectPtr<UNarrativeDialogDef>>& Cards)
+	{
+		return Cards.ContainsByPredicate([&Path](const TSoftObjectPtr<UNarrativeDialogDef>& Entry) { return Entry.ToSoftObjectPath() == Path; });
+	};
+	if (Lists(DeniedCards))
+	{
+		return false;
+	}
+	if (Lists(GrantedCards))
+	{
+		return true;
+	}
+
+	const bool bFamilyGranted = Card.Family.IsValid() && GrantedFamilies.HasTagExact(Card.Family);
+	if (bExplicitOnly)
+	{
+		return bFamilyGranted;
+	}
+	if (Card.Family.IsValid() && DeniedFamilies.HasTagExact(Card.Family))
+	{
+		return false;
+	}
+	// D3: everything is in the voice by default except a mechanic, which needs its family granted.
+	return !Card.IsMechanic() || bFamilyGranted;
+}
+
+namespace
+{
+	bool HasTagUnder(const FGameplayTagContainer& Tags, const TCHAR* Prefix)
+	{
+		for (const FGameplayTag& Tag : Tags)
+		{
+			if (Tag.ToString().StartsWith(Prefix))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+bool UNarrativeDialogDef::IsMechanic() const
+{
+	return HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic."));
+}
+
+ENarrativeOutcomePolicy UNarrativeDialogDef::GetOutcomePolicy() const
+{
+	if (OutcomePolicy != ENarrativeOutcomePolicy::Auto)
+	{
+		return OutcomePolicy;
+	}
+	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.GiveItem")))
+	{
+		return ENarrativeOutcomePolicy::Gift;
+	}
+	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.Recruit")))
+	{
+		return ENarrativeOutcomePolicy::Request;
+	}
+	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.EndDialog")))
+	{
+		return ENarrativeOutcomePolicy::Farewell;
+	}
+	return ENarrativeOutcomePolicy::Line;
+}
+
+const UNarrativeFamilyDef* UNarrativeFamilyDef::Find(const FGameplayTag& Family)
+{
+	if (!Family.IsValid())
+	{
+		return nullptr;
+	}
+	const UNarrativeFamilyDef* Found = nullptr;
+	for (const TSoftObjectPtr<UNarrativeFamilyDef>& Asset : GetLoadedAssets())
+	{
+		if (Asset.IsValid() && Asset->Family == Family)
+		{
+			// Two assets for one family is a lint (L10); the first by path wins, so the answer is stable.
+			if (!Found || Asset->GetPathName() < Found->GetPathName())
+			{
+				Found = Asset.Get();
+			}
+		}
+	}
+	return Found;
+}
+#pragma endregion
+
+#pragma region Live Authoring Hooks
+#if WITH_EDITOR
 void UNarrativeEntityDef::PostEditChangeProperty(FPropertyChangedEvent& Event)
 {
 	Super::PostEditChangeProperty(Event);

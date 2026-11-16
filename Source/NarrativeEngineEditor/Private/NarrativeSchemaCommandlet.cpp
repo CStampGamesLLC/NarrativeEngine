@@ -540,6 +540,9 @@ namespace
 		{
 			NarrativeLints::LintEntity(*Entity, Issues);
 		}
+		// The catalog lints (P0-N): L5 and L10 need every card at once.
+		TArray<const UNarrativeDialogDef*> Catalog(Cards);
+		NarrativeLints::LintCatalog(Catalog, Issues);
 		return Issues;
 	}
 

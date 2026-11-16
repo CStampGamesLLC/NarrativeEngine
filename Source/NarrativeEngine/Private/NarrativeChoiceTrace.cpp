@@ -37,9 +37,15 @@ FString FNarrativeChoiceTrace::Describe() const
 {
 	FString Out = FString::Printf(TEXT("Choice trace #%llu at %.2f s: %s -> %s (%s)\n"), static_cast<unsigned long long>(Sequence), WorldSeconds,
 		*Speaker, *Addressee, bPlayerHand ? TEXT("player hand") : TEXT("reply"));
+	Out += FString::Printf(TEXT("  preset %s, dealer %s%s, policy %s, opportunity %llu, beat %lld%s\n"), *Preset, *Dealer, bDealerOverridden ? TEXT(" (override)") : TEXT(""),
+		*Policy, static_cast<unsigned long long>(Opportunity), static_cast<long long>(Beat), BeatCause.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *BeatCause));
 	if (!FallbackReason.IsEmpty())
 	{
-		return Out + FString::Printf(TEXT("  legacy draw dealt: %s\n"), *FallbackReason);
+		return Out + FString::Printf(TEXT("  not dealt: %s\n"), *FallbackReason);
+	}
+	if (!ShortCause.IsEmpty())
+	{
+		Out += FString::Printf(TEXT("  short hand: %s\n"), *ShortCause);
 	}
 
 	Out += FString::Printf(TEXT("  belief %s, A~ %s, P(silence) %.3f, %d cards over %d families\n"), LexToString(BeliefSource),
@@ -52,6 +58,8 @@ FString FNarrativeChoiceTrace::Describe() const
 			Out += FString::Printf(TEXT("  reply: roll %.3f -> silence (P %.3f against %d families)\n"), Dealt.FamilyRoll, Dealt.SilenceWeight, Dealt.Candidates.Num());
 			continue;
 		}
+		const FNarrativeChoiceTraceCard* Shown = Cards.IsValidIndex(Dealt.Phrasing) ? &Cards[Dealt.Phrasing] : nullptr;
+		Out += FString::Printf(TEXT("  [%s] %s, %d Effort\n"), NarrativeChoice::LexToString(Dealt.Kind), Shown ? *Shown->Tier : TEXT("?"), Shown ? Shown->Effort : 0);
 		Out +=FString::Printf(TEXT("  card %d: roll %.3f -> #%d %s (%d of %d left)%s; wording roll %.3f -> \"%s\"\n"), Slot + 1, Dealt.FamilyRoll,
 			Dealt.FamilyRank + 1, *FamilyNames[Evaluation.Families[Dealt.FamilyRank].Family], Dealt.CandidateIndex + 1, Dealt.Candidates.Num(),
 			Dealt.CandidateIndex > 0 ? *FString::Printf(TEXT(", over #%d"), Dealt.Candidates[0] + 1) : TEXT(""), Dealt.PhrasingRoll, *Cards[Dealt.Phrasing].Phrase);

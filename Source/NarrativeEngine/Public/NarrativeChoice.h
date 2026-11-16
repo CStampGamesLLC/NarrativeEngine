@@ -15,9 +15,11 @@
  * (K ≥ FParams::ReachFloor), so an unreachable rewording never drags its idea below silence. A family
  * with nothing in reach is scored over all its phrasings, for the record only.
  *
- * Motive (ν) and echo (ρ) stay 0 until their inputs exist (Pattern 9). Legality and directional
- * repulsion (Patterns 8, 10) are not ported yet: every card counts as legal, and the deal draws
- * families by P(g) alone.
+ * Motive (ν) and echo (ρ) stay 0 until their inputs exist (Pattern 9). Legality (Pattern 8) is an
+ * input: an illegal phrasing is scored for the record but never enters its family's weight, and a
+ * family with no legal phrasing is out of the partition altogether. Two policies deal from one
+ * evaluation (Pattern 10): Choice (Reply, and Deal for the Choice hand) and the Offer (a party
+ * member's hand: verbs, reserved slots, novelty and directional repulsion).
  */
 namespace NarrativeChoice
 {
@@ -53,6 +55,14 @@ namespace NarrativeChoice
 
 		/** h_y: +1 for what is done to friends, -1 for what is done to foes. */
 		double Stance = 0.0;
+
+		/** 0 when the speaker may say it (Pattern 8); otherwise the 1-based number of the legality check that failed. */
+		uint8 IllegalCheck = 0;
+
+		/** ℓ_y - x̂_L on every axis of the space, for the Offer's directional repulsion (spec §5.2). Empty: no repulsion. */
+		TArray<double> Direction;
+
+		bool IsLegal() const { return IllegalCheck == 0; }
 	};
 
 	/** u_y term by term, and where it lands. */
@@ -92,6 +102,8 @@ namespace NarrativeChoice
 		OutOfReach,
 		/** P(g) ≤ P(∅): saying nothing beats this idea. */
 		BelowSilence,
+		/** No phrasing of it is legal for this speaker and addressee (Pattern 8): out of the partition. */
+		Illegal,
 	};
 
 	NARRATIVEENGINE_API const TCHAR* LexToString(EFamilyEligibility Eligibility);
@@ -109,6 +121,12 @@ namespace NarrativeChoice
 		double Probability = 0.0;
 		double MaxSpeakerReach = 0.0;
 		EFamilyEligibility Eligibility = EFamilyEligibility::Eligible;
+
+		/** For an Illegal family, the earliest check that removed its phrasings (the chain's order); 0 otherwise. */
+		uint8 IllegalCheck = 0;
+
+		/** Its phrasings that are legal, in reach or not. */
+		int32 LegalPhrasings = 0;
 	};
 
 	struct FEvaluation
@@ -144,9 +162,31 @@ namespace NarrativeChoice
 	/** Inverse CDF in the given order: the first index whose running sum exceeds U Σw. INDEX_NONE when nothing weighs anything. */
 	NARRATIVEENGINE_API int32 PickByRoll(TConstArrayView<double> Weights, double U);
 
+	/** What a dealt card is in its hand (Pattern 10; the trace's slot kind). */
+	enum class EDealSlotKind : uint8
+	{
+		/** Drawn by the rule: a Choice hand's card, or one of the Offer's draws. */
+		Draw,
+		/** A speaker's own choice: a reply or a bark. */
+		Reply,
+		/** A legal mechanic family, always offered outside the four (D7). */
+		Verb,
+		/** The best legal warming family (h = +1, J > 0). */
+		ReservedWarm,
+		/** The best legal provoking family (h = -1, J > 0). */
+		ReservedProvoke,
+	};
+
+	NARRATIVEENGINE_API const TCHAR* LexToString(EDealSlotKind Kind);
+
 	/** One card of a dealt hand, or a reply: which idea and wording, and the two rolls that chose them. */
 	struct FDealSlot
 	{
+		EDealSlotKind Kind = EDealSlotKind::Draw;
+
+		/** The fill-order slot whose lanes (2s, 2s + 1) its rolls used; INDEX_NONE for a verb, which rolls nothing. */
+		int32 LaneSlot = INDEX_NONE;
+
 		/** Index into FEvaluation::Families; Families[FamilyRank].Family names the idea. INDEX_NONE when a reply rolled silence. */
 		int32 FamilyRank = INDEX_NONE;
 		int32 Phrasing = INDEX_NONE;
@@ -175,6 +215,90 @@ namespace NarrativeChoice
 	 * exhaustion and never pads. Uniform(Lane) supplies the draws: lanes 2k and 2k+1 for slot k.
 	 */
 	NARRATIVEENGINE_API TArray<FDealSlot> Deal(const FEvaluation& Evaluation, int32 HandSize, TFunctionRef<double(uint64 Lane)> Uniform);
+
+	/**
+	 * The Offer's sheet (Pattern 10's hand sheet): data versioned with the preset, never code. ChoiceHand() is the
+	 * reduction case of §4.4: with it the Offer deals exactly what Deal deals.
+	 */
+	struct FOfferSheet
+	{
+		int32 HandSize = 4;
+		bool bVerbs = true;
+		bool bReservedSlots = true;
+		/** Spec §5.2's directional repulsion between the cards of one hand. */
+		bool bRepulsion = true;
+		/** β_hand; τ = β_hand / β is derived. */
+		double HandBeta = 1.0;
+		/** W: how many of the pair's last offers novelty remembers. */
+		int32 NoveltyWindow = 3;
+		/** ν: each recent offer of a family multiplies its draw weight by this. 1 turns novelty off. */
+		double NoveltyDiscount = 0.5;
+
+		/** τ = ν = 1, no verbs, no reserved slots, no repulsion: today's Choice hand. */
+		static FOfferSheet ChoiceHand()
+		{
+			FOfferSheet Sheet;
+			Sheet.bVerbs = false;
+			Sheet.bReservedSlots = false;
+			Sheet.bRepulsion = false;
+			Sheet.NoveltyDiscount = 1.0;
+			return Sheet;
+		}
+	};
+
+	/** What the Offer needs to know of each family beyond the evaluation, indexed by FPhrasing::Family. */
+	struct FOfferFamily
+	{
+		/** A mechanic family: dealt as a verb when the sheet has verbs. */
+		bool bVerb = false;
+
+		/** +1 warming, -1 provoking: every legal phrasing has J > 0 and this h. 0 for neither or mixed (never reserved). */
+		int32 Sign = 0;
+
+		/** n_g: how many of the pair's last W offers held this family. */
+		int32 Novelty = 0;
+
+		/** Ties among reserved candidates break by this, ascending. */
+		FString Id;
+	};
+
+	/** One Offer, slot by slot, with what kept it short. */
+	struct FOfferResult
+	{
+		/** Verbs first, then the four in fill order (warm, provoke, draws). */
+		TArray<FDealSlot> Slots;
+
+		/** r'_g per family rank (FEvaluation::Families order): ln w̄_g + n_g ln ν. -inf for a family out of the pool. */
+		TArray<double> NoveltyScores;
+
+		/** Empty when the four filled; else what kept them short: "legality", "repertoire", "reach", "below silence" or "pool exhausted". */
+		FString ShortCause;
+
+		int32 NumVerbs() const { return Slots.FilterByPredicate([](const FDealSlot& Slot) { return Slot.Kind == EDealSlotKind::Verb; }).Num(); }
+	};
+
+	/** The legality check numbered 1 in Pattern 8's chain: a family the speaker's repertoire doesn't grant. */
+	constexpr uint8 RepertoireCheck = 1;
+
+	/**
+	 * A party member's hand (Pattern 10), in the contract's order: score, verbs, novelty, reserved slots, draws.
+	 * Families indexes FOfferFamily by FPhrasing::Family. Phrasings supplies the repulsion directions. Uniform(Lane)
+	 * draws as Deal's does: lanes 2s and 2s + 1 for fill-order slot s, where the warm slot is 0, the provoke slot 1
+	 * and draws start at 2 (at 0 when the sheet has no reserved slots, so the reduction case keeps Deal's lanes).
+	 */
+	NARRATIVEENGINE_API FOfferResult Offer(const FParams& Params, const FOfferSheet& Sheet, const FEvaluation& Evaluation, TConstArrayView<FPhrasing> Phrasings,
+		const TMap<int32, FOfferFamily>& Families, TFunctionRef<double(uint64 Lane)> Uniform);
+
+	/**
+	 * A phrasing's repulsion direction d_y = M_y (ℓ_y - x̂_L) (spec §5.2): from the speaker's belief about the listener
+	 * (x̂_L, never the listener's true position nor the speaker's own) to the card, on the card's own mask and zero
+	 * elsewhere, so cards about different axes never repel. Location and Belief are gathered on the mask, in mask order;
+	 * AxisSlots places each mask axis in a shared axis table of NumAxes.
+	 */
+	NARRATIVEENGINE_API TArray<double> MaskedDirection(TConstArrayView<int32> AxisSlots, TConstArrayView<double> Location, TConstArrayView<double> Belief, int32 NumAxes);
+
+	/** ρ_g against the cards already in a hand: Π (1 - max(0, cos(d_g, d_g'))²) over the hand's directions (spec §5.2). */
+	NARRATIVEENGINE_API double Repulsion(TConstArrayView<double> Direction, TConstArrayView<TArray<double>> Hand);
 
 	/** Whether a reply can say this idea: it is in the speaker's reach. Beating silence is the hand's bar, not the speaker's. */
 	NARRATIVEENGINE_API bool CanReply(const FFamilyScore& Family);

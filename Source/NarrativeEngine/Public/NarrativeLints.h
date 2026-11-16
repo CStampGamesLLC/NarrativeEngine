@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 
 class UNarrativeDialogDef;
 class UNarrativeEntityDef;
@@ -62,8 +63,30 @@ namespace NarrativeLints
 	/** J ≤ min(tier cap, 1.8/σ). Legendary cards are exempt (they canonize instead) and return +inf. */
 	NARRATIVEENGINE_API double StrengthCap(double Sigma);
 
+	/** A card's price as one function decides it (TDD Pattern 8, spec §13.4): every consumer calls TierOf, nothing stores it. */
+	struct FTierInfo
+	{
+		ENarrativeTier Tier = ENarrativeTier::Common;
+		/** Effort 1-5 by tier; rarity is the tier. */
+		int32 Effort = 1;
+		/** min(tier cap, 1.8/σ); +inf for Legendary. */
+		double StrengthCap = 0.0;
+	};
+
+	NARRATIVEENGINE_API FTierInfo TierOf(double Sigma);
+
 	NARRATIVEENGINE_API void LintCard(const UNarrativeDialogDef& Card, TArray<FNarrativeLintIssue>& OutIssues);
 	NARRATIVEENGINE_API void LintEntity(const UNarrativeEntityDef& Entity, TArray<FNarrativeLintIssue>& OutIssues);
+
+	/**
+	 * The catalog lints that need every card at once (TDD Pattern 26, P0-N): L5 two families that are one idea, L10 a
+	 * family whose phrasings disagree in mask, h, mechanic or tier, or that lacks a current author sign-off. The pair
+	 * lints (L2, L3, L9) need deals, so they run in DungeonBreak.Narrative.Acceptance.CatalogLints.
+	 */
+	NARRATIVEENGINE_API void LintCatalog(TConstArrayView<const UNarrativeDialogDef*> Cards, TArray<FNarrativeLintIssue>& OutIssues);
+
+	/** What an author signs (L10): the family's phrasings as they stand. Any edit to one of them changes it. */
+	NARRATIVEENGINE_API FString FamilyHash(const FGameplayTag& Family, TConstArrayView<const UNarrativeDialogDef*> Cards);
 
 	/** L14 alone, for callers that lint a card's mechanics without its geometry. */
 	NARRATIVEENGINE_API void LintMechanics(const UNarrativeDialogDef& Card, TArray<FNarrativeLintIssue>& OutIssues);

@@ -64,6 +64,25 @@ struct NARRATIVEENGINE_API FNarrativeCampaignStats
 	int64 Decisions = 0;
 	int64 Valuations = 0;
 	int64 DuplicateValuations = 0;
+	/* Conversation beats advanced (TDD Pattern 27), and beats refused because a producer still held a tick. */
+	int64 Beats = 0;
+	int64 HeldBeats = 0;
+};
+
+/**
+ * One speaker's dialog history toward one addressee (TDD Patterns 9, 10; §7 Relation): the opportunity counter that
+ * keys every hand, Think, reply and bark, and the novelty memory of the last offers. Authoritative: saved with the
+ * relation in P1, hashed now. A read or a hover never advances it.
+ */
+struct NARRATIVEENGINE_API FNarrativeDialogPairState
+{
+	/* More than any hand sheet's window W. */
+	static constexpr int32 MaxRemembered = 8;
+
+	uint64 Opportunities = 0;
+
+	/* The families shown in each recent offer, oldest first. Verbs and Silence never enter. */
+	TArray<TArray<FName>> RecentOffers;
 };
 
 /**
@@ -214,6 +233,29 @@ public:
 	uint32 ComputeStateHash(bool bIncludeClockDebt = false) const;
 #pragma endregion
 
+#pragma region Dialog
+	/** The pair's next opportunity index, advancing the counter: once per hand, Think, reply or bark (TDD Pattern 9). */
+	uint64 TakeOpportunity(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee);
+
+	/** The index the next TakeOpportunity returns. Never advances anything. */
+	uint64 PeekOpportunity(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee) const;
+
+	/** n_g: how many of the pair's last Window offers held Family (TDD Pattern 10). */
+	int32 CountRecentOffers(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee, FName Family, int32 Window) const;
+
+	/** A hand was shown: its non-verb families enter the pair's novelty memory. A Think is a new offer and enters again. */
+	void RecordOffer(const FNarrativeEntityId& Speaker, const FNarrativeEntityId& Addressee, const TArray<FName>& Families);
+
+	const TMap<TTuple<FNarrativeEntityId, FNarrativeEntityId>, FNarrativeDialogPairState>& GetDialogPairs() const { return DialogPairs; }
+
+	/**
+	 * A conversation beat (TDD Pattern 27, D1): while a conversation holds the world paused, a committed line or reply
+	 * advances narrative time by exactly Seconds (one decision interval) and seals it, so the addressee judges each line
+	 * before it answers. False, advancing nothing, while any producer holds a tick; OutHeldBy names it.
+	 */
+	bool AdvanceBeat(double Seconds, FString* OutHeldBy = nullptr);
+#pragma endregion
+
 #pragma region Game hooks
 	/** The party, as the roster now stands: each member with a mind keeps every other member pinned. */
 	void SetPartyPins(const TArray<FNarrativeEntityId>& Members);
@@ -313,4 +355,6 @@ private:
 	TArray<FTellNotice> TellNotices;
 	TArray<FNarrativeEvent> CommittedNotices;
 	bool bPumping = false;
+
+	TMap<TTuple<FNarrativeEntityId, FNarrativeEntityId>, FNarrativeDialogPairState> DialogPairs;
 };

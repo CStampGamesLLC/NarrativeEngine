@@ -16,6 +16,22 @@ struct NARRATIVEENGINE_API FNarrativeChoiceTraceCard
 
 	/** The card has no authored mask; the dealer read its typed axes instead (L13 should flag it). */
 	bool bMaskInferred = false;
+
+	/** Pattern 8: 0 when legal, else the failing check's number, its name and a detail ("You have no coffee"). */
+	uint8 IllegalCheck = 0;
+	FString IllegalCheckName;
+	FString IllegalDetail;
+
+	/** TierOf(σ): rarity and the Effort it costs. */
+	FString Tier;
+	int32 Effort = 0;
+
+	/** Where the speaker's repertoire grants it: "default", "family", "card", or why not ("denied", "mechanic not granted"). */
+	FString RepertoireSource;
+
+	/** The card's strength J and its outcome policy. */
+	double Strength = 0.0;
+	FString OutcomePolicy;
 };
 
 /**
@@ -37,8 +53,28 @@ struct NARRATIVEENGINE_API FNarrativeChoiceTrace
 	/** The hand the player picks from, as opposed to a reply bubble. */
 	bool bPlayerHand = false;
 
-	/** Set when the rule couldn't run and the legacy draw dealt instead. */
+	/** Set when the rule couldn't run. Under Dialog the hand is then Silence alone (Pattern 9: never the legacy draw). */
 	FString FallbackReason;
+
+	/** The latched preset, the dealer and whether db.Narrative.Dealer overrode it (Pattern 25, P0-H). */
+	FString Preset;
+	FString Dealer;
+	bool bDealerOverridden = false;
+
+	/** "offer", "choice hand" or "choice" (a reply); and the Offer's sheet when one dealt. */
+	FString Policy;
+	NarrativeChoice::FOfferSheet Sheet;
+
+	/** The pair's opportunity index this deal used (Pattern 9), and the conversation beat it fell in, with that beat's cause. */
+	uint64 Opportunity = 0;
+	int64 Beat = 0;
+	FString BeatCause;
+
+	/** Empty when the four filled; else what kept them short (Pattern 10). */
+	FString ShortCause;
+
+	/** r'_g per family rank when the Offer dealt (FEvaluation::Families order). */
+	TArray<double> NoveltyScores;
 
 	ENarrativeBeliefSource BeliefSource = ENarrativeBeliefSource::FirstImpression;
 

@@ -17,6 +17,69 @@ class NARRATIVEENGINE_API UNarrativeEventDef : public UNarrativeDataAsset
 	NARRATIVE_DATA_HELPERS(UNarrativeEventDef)
 };
 
+/** Whom a card may be said to (TDD Pattern 8, check 2). */
+UENUM(BlueprintType, meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
+enum class ENarrativeDialogTarget : uint8
+{
+	None = 0 UMETA(Hidden),
+	/** The speaker: talking to oneself, as toward a wordless thing. */
+	Self = 1 << 0,
+	/** A character outside the speaker's party. */
+	NonMember = 1 << 1,
+	/** A member of the speaker's party. */
+	PartyMember = 1 << 2,
+};
+ENUM_CLASS_FLAGS(ENarrativeDialogTarget);
+
+/** Which record carries a mechanic card's material value (TDD Pattern 11). */
+UENUM(BlueprintType)
+enum class ENarrativeOutcomePolicy : uint8
+{
+	/** From the card's mechanic tag: GiveItem a gift, Recruit a request, EndDialog a farewell, else a line. */
+	Auto,
+	/** The line carries the deed, as every card without a mechanic does. */
+	Line,
+	/** The line carries J = 0; the transfer carries the card's J, once, as the line's child. */
+	Gift,
+	/** Both the line and its outcome carry J = 0 (MD7): an invitation awards no goodwill. */
+	Request,
+	/** The line only; it ends the conversation. */
+	Farewell,
+};
+
+/**
+ * What a character may say (TDD Pattern 10, D3): every family is granted unless denied, except mechanic families
+ * (a card carrying a Dialog.Mechanic tag), which need a grant. Single cards may be granted or denied on top.
+ */
+USTRUCT(BlueprintType)
+struct NARRATIVEENGINE_API FNarrativeRepertoire
+{
+	GENERATED_BODY()
+
+	/** Mechanic families this character may use (Recruit, Item.Give, Depart, SeeWares), and with bExplicitOnly every family it may. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Repertoire", meta = (Categories = "Dialog.Family"))
+	FGameplayTagContainer GrantedFamilies;
+
+	/** Families withheld from this character's voice although granted by default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Repertoire", meta = (Categories = "Dialog.Family"))
+	FGameplayTagContainer DeniedFamilies;
+
+	/** Cards granted whatever their family. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Repertoire")
+	TArray<TSoftObjectPtr<UNarrativeDialogDef>> GrantedCards;
+
+	/** Cards withheld whatever their family. A denial beats a grant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Repertoire")
+	TArray<TSoftObjectPtr<UNarrativeDialogDef>> DeniedCards;
+
+	/** D3's alternative: only GrantedFamilies and GrantedCards, nothing by default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Repertoire")
+	bool bExplicitOnly = false;
+
+	/** Whether this repertoire lets its character say Card. */
+	bool Grants(const UNarrativeDialogDef& Card) const;
+};
+
 /**
  * How a character reads others and holds a stance (spec §13.2; TDD Patterns 12, 16, 18). Stance
  * parameters are per-character data, never constants: a calibrated character's sheet may differ
@@ -128,6 +191,14 @@ public:
 	/** How this character reads others and holds a stance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mind")
 	FNarrativeMindSheet Mind;
+
+	/** What this character may say (TDD Pattern 10, D3): its voice, as opposed to the whole catalog. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog")
+	FNarrativeRepertoire Repertoire;
+
+	/** Real seconds between a line and this character's reply showing (D4): presentation only, keyed, the same on replay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialog")
+	FFloatInterval ReplyDelay = FFloatInterval(1.f, 2.5f);
 
 	/** One particular character, whom minds form relations with. Off for objects and for kinds that many
 	 *  actors share (a mob's entity asset): minds keep no relation with those, and read them from the faction tables. */
@@ -305,6 +376,86 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FGameplayTagContainer AbilityTags;
 
+	/** Whom this card may be said to (TDD Pattern 8, check 2). Toward a wordless thing only Self cards are legal. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Legality", meta = (Bitmask, BitmaskEnum = "/Script/NarrativeEngine.ENarrativeDialogTarget"))
+	int32 TargetTypes = static_cast<int32>(ENarrativeDialogTarget::NonMember | ENarrativeDialogTarget::PartyMember);
 
+	/** Game seconds before the speaker may say this card again (Pattern 8, check 6). 0: its family's, if any. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Legality", meta = (ClampMin = "0", Units = "s"))
+	float Cooldown = 0.f;
+
+	/** Which record carries a mechanic card's value (TDD Pattern 11). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Legality")
+	ENarrativeOutcomePolicy OutcomePolicy = ENarrativeOutcomePolicy::Auto;
+
+	/** The policy in force: Auto read from the mechanic tags. */
+	ENarrativeOutcomePolicy GetOutcomePolicy() const;
+
+	/** A mechanic card: one of its ability tags is a Dialog.Mechanic tag. Its family needs a grant (D3) and is offered as a verb (D7). */
+	bool IsMechanic() const;
+
+	/** Whether the card may be said to this kind of addressee. */
+	bool AllowsTarget(ENarrativeDialogTarget Target) const { return (TargetTypes & static_cast<int32>(Target)) != 0; }
+
+	/** Bumped whenever any card loads, unloads or is edited: the dealer's cached catalog rebuilds on a change (TDD §9). */
+	static uint32 GetCatalogRevision() { return CatalogRevision; }
+
+	virtual void PostLoad() override { Super::PostLoad(); ++CatalogRevision; }
+	virtual void BeginDestroy() override { ++CatalogRevision; Super::BeginDestroy(); }
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override { Super::PostEditChangeProperty(Event); ++CatalogRevision; }
+	virtual void PostEditUndo() override { Super::PostEditUndo(); ++CatalogRevision; }
+#endif
+
+private:
+	static inline uint32 CatalogRevision = 0;
+
+public:
 	NARRATIVE_DATA_HELPERS(UNarrativeDialogDef)
+};
+
+/** An author's record that a family's phrasings say one thing (TDD Pattern 7, L10). */
+USTRUCT(BlueprintType)
+struct NARRATIVEENGINE_API FNarrativeFamilySignOff
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign-off")
+	FString Author;
+
+	/** ISO date, e.g. 2026-11-14. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign-off")
+	FString Date;
+
+	/** The family's phrasings when signed (NarrativeLints::FamilyHash). A changed family needs signing again. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign-off")
+	FString CatalogHash;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign-off", meta = (MultiLine = "true"))
+	FString Note;
+
+	bool IsSigned() const { return !Author.IsEmpty() && !CatalogHash.IsEmpty(); }
+};
+
+/** A family of cards (TDD §7 Family definition): its cooldown and its author sign-off. Families without an asset have neither. */
+UCLASS()
+class NARRATIVEENGINE_API UNarrativeFamilyDef : public UNarrativeDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Family", meta = (Categories = "Dialog.Family"))
+	FGameplayTag Family;
+
+	/** Game seconds before the speaker may say any phrasing of this family again (Pattern 8, check 6). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Family", meta = (ClampMin = "0", Units = "s"))
+	float Cooldown = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Family")
+	FNarrativeFamilySignOff SignOff;
+
+	/** The asset for Family, or null. */
+	static const UNarrativeFamilyDef* Find(const FGameplayTag& Family);
+
+	NARRATIVE_DATA_HELPERS(UNarrativeFamilyDef)
 };
