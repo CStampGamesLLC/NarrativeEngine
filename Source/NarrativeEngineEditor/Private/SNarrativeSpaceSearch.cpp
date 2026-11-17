@@ -23,6 +23,9 @@ namespace NarrativeSpaceSearchUI
 	/** Fastest the results re-run while assets keep changing under an open search, in seconds. */
 	constexpr double StaleRefreshInterval = 0.5;
 
+	/** Seconds of indexing a frame may spend while assets wait; a search itself may spend 8 ms more. */
+	constexpr double IndexBudgetPerFrame = 0.004;
+
 	const FLinearColor DimTextColor(0.5f, 0.6f, 0.7f);
 }
 
@@ -92,8 +95,10 @@ void SNarrativeSpaceSearch::Activate()
 void SNarrativeSpaceSearch::Tick(const FGeometry& Geometry, const double CurrentTime, const float DeltaTime)
 {
 	SCompoundWidget::Tick(Geometry, CurrentTime, DeltaTime);
-	// An asset renamed, retagged or reworded under an open search should not leave stale rows behind.
-	// A details-panel drag marks the index stale every frame, so this paces itself.
+	// Fill the index a slice per frame while the bar is on screen, so typing rarely waits on it.
+	Index.Pump(NarrativeSpaceSearchUI::IndexBudgetPerFrame);
+	// An asset renamed, retagged or reworded under an open search should not leave stale rows behind, and rows
+	// fill in as the index does. Moving an asset in the space doesn't make the index stale at all.
 	if (IsSearching() && Index.IsStale() && CurrentTime - LastSearchTime >= NarrativeSpaceSearchUI::StaleRefreshInterval)
 	{
 		RunSearch();
@@ -302,10 +307,15 @@ TSharedRef<ITableRow> SNarrativeSpaceSearch::GenerateRow(const FResultPtr Result
 FText SNarrativeSpaceSearch::MatchCountText() const
 {
 	if (!IsSearching()) { return FText::GetEmpty(); }
-	if (MatchCount == 0) { return LOCTEXT("NoMatches", "No matches"); }
-	return MatchCount > Results.Num()
-		? FText::Format(LOCTEXT("SomeMatches", "{0} matches, best {1} listed"), FText::AsNumber(MatchCount), FText::AsNumber(Results.Num()))
-		: FText::Format(LOCTEXT("Matches", "{0} {0}|plural(one=match,other=matches)"), MatchCount);
+	const FText Count = MatchCount == 0
+		? LOCTEXT("NoMatches", "No matches")
+		: MatchCount > Results.Num()
+			? FText::Format(LOCTEXT("SomeMatches", "{0} matches, best {1} listed"), FText::AsNumber(MatchCount), FText::AsNumber(Results.Num()))
+			: FText::Format(LOCTEXT("Matches", "{0} {0}|plural(one=match,other=matches)"), MatchCount);
+	// The index fills in over a few frames; say so rather than let a short list look final.
+	return Index.IsIndexing()
+		? FText::Format(LOCTEXT("Indexing", "{0} (indexing, {1} to go)"), Count, FText::AsNumber(Index.NumPending()))
+		: Count;
 }
 
 #undef LOCTEXT_NAMESPACE

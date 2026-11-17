@@ -167,20 +167,39 @@ namespace NarrativeSpaceSearch
 			|| (FChar::IsDigit(Previous) != FChar::IsDigit(Here));
 	}
 
-	/** How cleanly Term lands in Text, from 0 for a miss, with where its best landing starts. */
-	float MatchQuality(const FString& Text, const FString& Term, int32& OutAt)
+	/** Never indexed (see CollectValue): an edit confined to one of these changes no searchable text. */
+	bool IsPlacementType(const FProperty* Property)
 	{
-		if (Text.Equals(Term, ESearchCase::IgnoreCase)) { OutAt = 0; return Quality::Whole; }
-		float Best = 0.f;
-		for (int32 At = Text.Find(Term, ESearchCase::IgnoreCase); At != INDEX_NONE;
-			At = Text.Find(Term, ESearchCase::IgnoreCase, ESearchDir::FromStart, At + 1))
-		{
-			const float Here = IsWordStart(Text, At) ? Quality::WordStart : Quality::Anywhere;
-			if (Here > Best) { Best = Here; OutAt = At; }
-			if (Best >= Quality::WordStart) { break; }
-		}
-		return Best;
+		if (const FArrayProperty* Array = CastField<FArrayProperty>(Property)) { Property = Array->Inner; }
+		const FStructProperty* Struct = CastField<FStructProperty>(Property);
+		return Struct && (Struct->Struct == FVectorND::StaticStruct() || Struct->Struct == FNarrativeMask::StaticStruct());
 	}
+}
+
+float NarrativeSpaceSearch::MatchQuality(const FString& Text, const FString& Term, int32& OutAt)
+{
+	if (Term.IsEmpty()) { return 0.f; }
+	if (Text.Equals(Term, ESearchCase::IgnoreCase)) { OutAt = 0; return Quality::Whole; }
+	float Best = 0.f;
+	for (int32 At = Text.Find(Term, ESearchCase::IgnoreCase); At != INDEX_NONE;)
+	{
+		const float Here = IsWordStart(Text, At) ? Quality::WordStart : Quality::Anywhere;
+		if (Here > Best) { Best = Here; OutAt = At; }
+		if (Best >= Quality::WordStart) { break; }
+		// FString::Find clamps a start past the end back onto the last character, so a one-letter term that
+		// matched there would be found again for ever. Nothing can start where the term no longer fits: stop.
+		const int32 Next = At + 1;
+		if (Next + Term.Len() > Text.Len()) { break; }
+		At = Text.Find(Term, ESearchCase::IgnoreCase, ESearchDir::FromStart, Next);
+	}
+	return Best;
+}
+
+bool NarrativeSpaceSearch::AffectsIndex(const FPropertyChangedEvent& Event)
+{
+	// MemberProperty is the property on the edited object that holds the change, however deep the edit went.
+	const FProperty* Member = Event.MemberProperty ? Event.MemberProperty : Event.Property;
+	return !Member || !IsPlacementType(Member);
 }
 
 FNarrativeSearchEntry NarrativeSpaceSearch::Index(const UNarrativeDataAsset& Asset)
@@ -203,14 +222,23 @@ FNarrativeSearchEntry NarrativeSpaceSearch::Index(const UNarrativeDataAsset& Ass
 
 TArray<FNarrativeSearchResult> NarrativeSpaceSearch::Find(const TArray<FNarrativeSearchEntry>& Entries, const FString& Query, const int32 MaxResults)
 {
+	TArray<const FNarrativeSearchEntry*> Pointers;
+	Pointers.Reserve(Entries.Num());
+	for (const FNarrativeSearchEntry& Entry : Entries) { Pointers.Add(&Entry); }
+	return Find(Pointers, Query, MaxResults);
+}
+
+TArray<FNarrativeSearchResult> NarrativeSpaceSearch::Find(TConstArrayView<const FNarrativeSearchEntry*> Entries, const FString& Query, const int32 MaxResults)
+{
 	TArray<FNarrativeSearchResult> Results;
 	TArray<FString> Terms;
 	Query.ParseIntoArrayWS(Terms);
 	if (Terms.IsEmpty() || MaxResults <= 0) { return Results; }
 
-	for (const FNarrativeSearchEntry& Entry : Entries)
+	for (const FNarrativeSearchEntry* EntryPtr : Entries)
 	{
-		if (!Entry.Asset.IsValid()) { continue; }
+		if (!EntryPtr || !EntryPtr->Asset.IsValid()) { continue; }
+		const FNarrativeSearchEntry& Entry = *EntryPtr;
 
 		float Score = 0.f;
 		bool bAllMatched = true;
@@ -371,21 +399,84 @@ FNarrativeSpaceSearchIndex::~FNarrativeSpaceSearchIndex()
 
 void FNarrativeSpaceSearchIndex::PropertyChanged(UObject* Object, FPropertyChangedEvent& Event)
 {
-	// Undo and redo arrive here too, through PostEditUndo.
-	if (Object && (Object->IsA<UNarrativeDataAsset>() || Object->GetTypedOuter<UNarrativeDataAsset>())) { bStale = true; }
+	if (!Object) { return; }
+	const UNarrativeDataAsset* Asset = Cast<UNarrativeDataAsset>(Object);
+	if (!Asset) { Asset = Object->GetTypedOuter<UNarrativeDataAsset>(); }
+	// Undo and redo arrive here too, through PostEditUndo, naming no property: that reindexes the one asset.
+	// Moving an asset in the space changes nothing searchable, so it queues nothing.
+	if (Asset && NarrativeSpaceSearch::AffectsIndex(Event)) { Enqueue(FSoftObjectPath(Asset)); }
 }
 
-TArray<FNarrativeSearchResult> FNarrativeSpaceSearchIndex::Find(const FString& Query, const int32 MaxResults)
+void FNarrativeSpaceSearchIndex::AssetChanged(const FAssetData& Asset)
 {
-	if (bStale) { Rebuild(); }
-	return NarrativeSpaceSearch::Find(Entries, Query, MaxResults);
+	// The registry's list is re-read when the index next works, and only the difference is (re)indexed.
+	if (Asset.IsInstanceOf(UNarrativeDataAsset::StaticClass())) { bRescan = true; }
 }
 
-void FNarrativeSpaceSearchIndex::Rebuild()
+void FNarrativeSpaceSearchIndex::AssetRenamed(const FAssetData& Asset, const FString& OldPath)
 {
-	bStale = false;
-	Entries.Reset();
+	if (!Asset.IsInstanceOf(UNarrativeDataAsset::StaticClass())) { return; }
+	if (Entries.Remove(FSoftObjectPath(OldPath)) > 0) { bChangedSinceFind = true; }
+	bRescan = true;
+}
 
+void FNarrativeSpaceSearchIndex::ObjectsReplaced(const TMap<UObject*, UObject*>& Replacements)
+{
+	// Reinstancing can swap the objects entries point at, or the class they were reflected through.
+	for (const TPair<UObject*, UObject*>& Pair : Replacements)
+	{
+		if ((Pair.Key && Pair.Key->IsA<UNarrativeDataAsset>()) || (Pair.Value && Pair.Value->IsA<UNarrativeDataAsset>()))
+		{
+			MarkStale();
+			return;
+		}
+	}
+}
+
+void FNarrativeSpaceSearchIndex::MarkStale()
+{
+	bRescan = true;
+	for (const TPair<FSoftObjectPath, FNarrativeSearchEntry>& Pair : Entries) { Enqueue(Pair.Key); }
+}
+
+void FNarrativeSpaceSearchIndex::Enqueue(const FSoftObjectPath& Path)
+{
+	bool bQueued = false;
+	PendingSet.Add(Path, &bQueued);
+	if (!bQueued) { Pending.Add(Path); }
+}
+
+TArray<FNarrativeSearchResult> FNarrativeSpaceSearchIndex::Find(const FString& Query, const int32 MaxResults, const double BudgetSeconds)
+{
+	Pump(BudgetSeconds);
+	bChangedSinceFind = false;
+	TArray<const FNarrativeSearchEntry*> Indexed;
+	Indexed.Reserve(Entries.Num());
+	for (const TPair<FSoftObjectPath, FNarrativeSearchEntry>& Pair : Entries) { Indexed.Add(&Pair.Value); }
+	return NarrativeSpaceSearch::Find(Indexed, Query, MaxResults);
+}
+
+bool FNarrativeSpaceSearchIndex::Pump(const double BudgetSeconds)
+{
+	if (bRescan) { Rescan(); }
+	if (Pending.IsEmpty()) { return false; }
+
+	// At least one per call, so a slow load can't stall indexing for good; then as many as the budget allows.
+	const double Start = FPlatformTime::Seconds();
+	int32 Done = 0;
+	while (Done < Pending.Num() && (Done == 0 || FPlatformTime::Seconds() - Start < BudgetSeconds))
+	{
+		PendingSet.Remove(Pending[Done]);
+		Reindex(Pending[Done++]);
+	}
+	Pending.RemoveAt(0, Done);
+	bChangedSinceFind = true;
+	return true;
+}
+
+void FNarrativeSpaceSearchIndex::Rescan()
+{
+	bRescan = false;
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 	FARFilter Filter;
 	Filter.ClassPaths.Add(UNarrativeDataAsset::StaticClass()->GetClassPathName());
@@ -394,14 +485,42 @@ void FNarrativeSpaceSearchIndex::Rebuild()
 	Registry.GetAssets(Filter, Assets);
 
 	// Every narrative asset, not only the query's: picking one outside it retargets the query to it.
-	// The data catalog pins narrative assets at startup, so this is mostly a lookup, not a load.
-	Entries.Reserve(Assets.Num());
+	TSet<FSoftObjectPath> Present;
+	Present.Reserve(Assets.Num());
 	for (const FAssetData& Data : Assets)
 	{
-		if (const UNarrativeDataAsset* Asset = Cast<UNarrativeDataAsset>(Data.GetAsset()))
+		const FSoftObjectPath Path = Data.GetSoftObjectPath();
+		Present.Add(Path);
+		if (!Entries.Contains(Path)) { Enqueue(Path); }
+	}
+	for (auto It = Entries.CreateIterator(); It; ++It)
+	{
+		if (!Present.Contains(It.Key()))
 		{
-			Entries.Add(NarrativeSpaceSearch::Index(*Asset));
+			It.RemoveCurrent();
+			bChangedSinceFind = true;
 		}
+	}
+	Pending.RemoveAll([this, &Present](const FSoftObjectPath& Path)
+	{
+		const bool bGone = !Present.Contains(Path);
+		if (bGone) { PendingSet.Remove(Path); }
+		return bGone;
+	});
+}
+
+void FNarrativeSpaceSearchIndex::Reindex(const FSoftObjectPath& Path)
+{
+	// The data catalog pins narrative assets at startup, so this is mostly a lookup, not a load; the budget bounds the rest.
+	UObject* Object = Path.ResolveObject();
+	if (!Object) { Object = Path.TryLoad(); }
+	if (const UNarrativeDataAsset* Asset = Cast<UNarrativeDataAsset>(Object))
+	{
+		Entries.Add(Path, NarrativeSpaceSearch::Index(*Asset));
+	}
+	else
+	{
+		Entries.Remove(Path);
 	}
 }
 

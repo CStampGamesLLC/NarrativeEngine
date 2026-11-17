@@ -57,6 +57,22 @@ namespace NarrativeSpaceSearch
 	 */
 	TArray<FNarrativeSearchResult> Find(const TArray<FNarrativeSearchEntry>& Entries, const FString& Query, int32 MaxResults = 100);
 
+	/** Find over entries held elsewhere (the index keeps them by asset path). */
+	TArray<FNarrativeSearchResult> Find(TConstArrayView<const FNarrativeSearchEntry*> Entries, const FString& Query, int32 MaxResults = 100);
+
+	/**
+	 * How cleanly Term lands in Text: 1 for the whole field, 0.75 at a word start, 0.4 anywhere else, 0 for a miss.
+	 * OutAt is where its best landing starts.
+	 */
+	float MatchQuality(const FString& Text, const FString& Term, int32& OutAt);
+
+	/**
+	 * Whether an edit can change what Index collects. Vectors and masks are never indexed, so moving a card in the
+	 * space (the dialog tuner's Apply, a details-panel drag) needs no reindex. An event that names no property
+	 * (undo, redo) is assumed to.
+	 */
+	bool AffectsIndex(const struct FPropertyChangedEvent& Event);
+
 	/** A window of Text around a match, trimmed with ellipses, so a long phrase still fits a row. */
 	FString Snippet(const FString& Text, int32 MatchStart, int32 MatchLength, int32 Context = 40);
 
@@ -78,8 +94,12 @@ namespace NarrativeSpaceSearch
 }
 
 /**
- * The search bar's index over every narrative asset in the project, plotted by the current query
- * or not. Rebuilt lazily: asset and property changes only mark it stale.
+ * The search bar's index over every narrative asset in the project, plotted by the current query or not.
+ *
+ * Kept per asset and filled in bounded slices, never in one blocking pass: an edit re-queues only the asset it
+ * touched (and nothing at all when it only moved the asset in the space), asset additions, removals and renames
+ * only rescan the registry's list, and Pump indexes queued assets until its time budget runs out. A search runs
+ * over whatever is indexed so far; the owner keeps pumping and re-running while IsIndexing().
  */
 class FNarrativeSpaceSearchIndex
 {
@@ -87,20 +107,36 @@ public:
 	FNarrativeSpaceSearchIndex();
 	~FNarrativeSpaceSearchIndex();
 
-	/** Rebuilds the index if anything changed since it was built, then runs the query against it. */
-	TArray<FNarrativeSearchResult> Find(const FString& Query, int32 MaxResults = 100);
+	/** Indexes queued assets for up to BudgetSeconds (at least one), then runs the query over every asset indexed so far. */
+	TArray<FNarrativeSearchResult> Find(const FString& Query, int32 MaxResults = 100, double BudgetSeconds = 0.008);
 
-	/** True when an asset changed since the last build, so open results may be out of date. */
-	bool IsStale() const { return bStale; }
-	void MarkStale() { bStale = true; }
+	/** Indexes queued assets for up to BudgetSeconds, always at least one. True when it did any work. */
+	bool Pump(double BudgetSeconds);
+
+	/** True while assets wait to be (re)indexed, so a search may be missing some of them. */
+	bool IsIndexing() const { return bRescan || !Pending.IsEmpty(); }
+	int32 NumPending() const { return Pending.Num(); }
+
+	/** True when the index changed since the last Find, or is still filling in, so open results may be out of date. */
+	bool IsStale() const { return bChangedSinceFind || IsIndexing(); }
+
+	/** Re-reads the registry's list and reindexes every asset. */
+	void MarkStale();
 
 private:
-	TArray<FNarrativeSearchEntry> Entries;
-	bool bStale = true;
+	TMap<FSoftObjectPath, FNarrativeSearchEntry> Entries;
+	/** Assets to index or reindex, oldest first, and the same as a set so queueing stays cheap. */
+	TArray<FSoftObjectPath> Pending;
+	TSet<FSoftObjectPath> PendingSet;
+	/** The registry's list of narrative assets must be re-read: something was added, removed or renamed. */
+	bool bRescan = true;
+	bool bChangedSinceFind = true;
 
-	void Rebuild();
+	void Rescan();
+	void Enqueue(const FSoftObjectPath& Path);
+	void Reindex(const FSoftObjectPath& Path);
 	void PropertyChanged(UObject* Object, struct FPropertyChangedEvent& Event);
-	void AssetChanged(const FAssetData& Asset) { bStale = true; }
-	void AssetRenamed(const FAssetData& Asset, const FString& OldPath) { bStale = true; }
-	void ObjectsReplaced(const TMap<UObject*, UObject*>& Replacements) { bStale = true; }
+	void AssetChanged(const FAssetData& Asset);
+	void AssetRenamed(const FAssetData& Asset, const FString& OldPath);
+	void ObjectsReplaced(const TMap<UObject*, UObject*>& Replacements);
 };

@@ -484,6 +484,89 @@ bool FNarrativeSpaceSearchIndexTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/*
+ * FString::Find clamps a start past the end back onto the last character, so a one-letter term matching only the last
+ * character, mid-word, used to be found at the same index for ever and hang the editor. Every case here would hang.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceSearchSingleLetterTest, "Narrative.Space.Search.SingleLetter",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceSearchSingleLetterTest::RunTest(const FString& Parameters)
+{
+	int32 At = INDEX_NONE;
+	TestEqual(TEXT("'p' ends 'help' mid-word: found anywhere"), NarrativeSpaceSearch::MatchQuality(TEXT("help"), TEXT("p"), At), 0.4f);
+	TestEqual(TEXT("... at its last character"), At, 3);
+	TestEqual(TEXT("Case folds"), NarrativeSpaceSearch::MatchQuality(TEXT("HELP"), TEXT("p"), At), 0.4f);
+	TestEqual(TEXT("Repeated, last one mid-word"), NarrativeSpaceSearch::MatchQuality(TEXT("xpxp"), TEXT("p"), At), 0.4f);
+	TestEqual(TEXT("Absent"), NarrativeSpaceSearch::MatchQuality(TEXT("help"), TEXT("q"), At), 0.f);
+	TestEqual(TEXT("A word start later on still wins"), NarrativeSpaceSearch::MatchQuality(TEXT("helpPet"), TEXT("p"), At), 0.75f);
+	TestEqual(TEXT("... there"), At, 4);
+	TestEqual(TEXT("Two letters at the end"), NarrativeSpaceSearch::MatchQuality(TEXT("help"), TEXT("lp"), At), 0.4f);
+	TestEqual(TEXT("The whole field"), NarrativeSpaceSearch::MatchQuality(TEXT("p"), TEXT("p"), At), 1.f);
+	TestEqual(TEXT("An empty term matches nothing"), NarrativeSpaceSearch::MatchQuality(TEXT("help"), TEXT(""), At), 0.f);
+
+	// Through Find, as the search bar runs it: one entry whose only text ends in the letter.
+	NarrativeSpaceTests::FFixture Fixture;
+	FNarrativeSearchEntry Entry;
+	Entry.Asset = Fixture.Dialog;
+	Entry.Name = TEXT("Dialog");
+	Entry.Fields.Add({FText::FromString(TEXT("Phrase")), TEXT("Please help"), 5.f});
+	const TArray<FNarrativeSearchEntry> Entries = {Entry};
+	TestEqual(TEXT("Find returns on a one-letter suffix"), NarrativeSpaceSearch::Find(Entries, TEXT("p")).Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceSearchInvalidationTest, "Narrative.Space.Search.Invalidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeSpaceSearchInvalidationTest::RunTest(const FString& Parameters)
+{
+	NarrativeSpaceTests::FFixture Fixture;
+	FProperty* Location = FindFProperty<FProperty>(UNarrativeDialogDef::StaticClass(), GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Location));
+	FProperty* Mask = FindFProperty<FProperty>(UNarrativeDialogDef::StaticClass(), GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Mask));
+	FProperty* Phrase = FindFProperty<FProperty>(UNarrativeDialogDef::StaticClass(), GET_MEMBER_NAME_CHECKED(UNarrativeDialogDef, Phrase));
+
+	// What the dialog tuner's Apply sends, and a drag inside the vector's coordinates.
+	FPropertyChangedEvent Moved(Location, EPropertyChangeType::ValueSet);
+	FPropertyChangedEvent Dragged(FindFProperty<FProperty>(FVectorND::StaticStruct(), TEXT("Coordinates")), EPropertyChangeType::Interactive);
+	Dragged.SetActiveMemberProperty(Location);
+	FPropertyChangedEvent Remasked(Mask, EPropertyChangeType::ValueSet);
+	FPropertyChangedEvent Reworded(Phrase, EPropertyChangeType::ValueSet);
+	FPropertyChangedEvent Undone(nullptr);
+	TestFalse(TEXT("Moving a card in the space changes nothing searchable"), NarrativeSpaceSearch::AffectsIndex(Moved));
+	TestFalse(TEXT("Nor does a drag inside its vector"), NarrativeSpaceSearch::AffectsIndex(Dragged));
+	TestFalse(TEXT("Nor a mask edit"), NarrativeSpaceSearch::AffectsIndex(Remasked));
+	TestTrue(TEXT("Rewording does"), NarrativeSpaceSearch::AffectsIndex(Reworded));
+	TestTrue(TEXT("An event naming no property (undo) is assumed to"), NarrativeSpaceSearch::AffectsIndex(Undone));
+
+	// The index itself: filling it never blocks for long, and only real text edits bring the rows back to stale.
+	FNarrativeSpaceSearchIndex Index;
+	int32 Pumps = 0;
+	int32 Before = TNumericLimits<int32>::Max();
+	while (Index.IsIndexing() && Pumps < 100000)
+	{
+		Index.Pump(0.0);
+		TestTrue(TEXT("Each zero-budget pump still makes progress"), Index.NumPending() < Before || Pumps == 0);
+		Before = Index.NumPending();
+		++Pumps;
+	}
+	TestFalse(TEXT("Indexing finishes"), Index.IsIndexing());
+	Fixture.Dialog->Phrase = FText::FromString(TEXT("Hold the line"));
+	Index.MarkStale();
+	while (Index.IsIndexing()) { Index.Pump(1.0); }
+	TestEqual(TEXT("The fixture card is found"), Index.Find(TEXT("hold line")).Num(), 1);
+	TestFalse(TEXT("A search clears the stale flag"), Index.IsStale());
+
+	FCoreUObjectDelegates::OnObjectPropertyChanged.Broadcast(Fixture.Dialog, Moved);
+	TestFalse(TEXT("Apply's location write leaves the index fresh"), Index.IsStale());
+
+	Fixture.Dialog->Phrase = FText::FromString(TEXT("Stand fast"));
+	FCoreUObjectDelegates::OnObjectPropertyChanged.Broadcast(Fixture.Dialog, Reworded);
+	TestTrue(TEXT("Rewording queues the card"), Index.IsStale());
+	TestEqual(TEXT("... and only that card"), Index.NumPending(), 1);
+	TestEqual(TEXT("The new words are found after one bounded pump"), Index.Find(TEXT("stand fast"), 100, 0.0).Num(), 1);
+	TestTrue(TEXT("The old words are gone"), Index.Find(TEXT("hold line")).IsEmpty());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeSpaceSearchGoToTest, "Narrative.Space.Search.GoTo",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FNarrativeSpaceSearchGoToTest::RunTest(const FString& Parameters)

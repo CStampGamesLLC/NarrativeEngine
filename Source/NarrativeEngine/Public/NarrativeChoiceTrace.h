@@ -8,6 +8,14 @@
 struct NARRATIVEENGINE_API FNarrativeChoiceTraceCard
 {
 	FString AssetName;
+
+	/** The card asset, so the debugger's tuner can write a solved location back to it. */
+	FSoftObjectPath AssetPath;
+
+	/** The card's mask axes in mask order (the order of its FPhrasing arrays), and their display names. */
+	TArray<FSoftObjectPath> Axes;
+	TArray<FString> AxisNames;
+
 	FString Phrase;
 	FString Label;
 	double Sigma = 0.0;
@@ -93,6 +101,9 @@ struct NARRATIVEENGINE_API FNarrativeChoiceTrace
 
 	/** Indexed by family. */
 	TArray<FString> FamilyNames;
+
+	/** What the rule read, parallel to Cards: the debugger re-runs it with one card moved to preview a tuning. */
+	TArray<NarrativeChoice::FPhrasing> Inputs;
 
 	NarrativeChoice::FEvaluation Evaluation;
 	TArray<NarrativeChoice::FDealSlot> Slots;
