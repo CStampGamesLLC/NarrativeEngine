@@ -329,7 +329,22 @@ bool FNarrativeSpaceMakeNewTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Entity mask holds X and Y"), EntityMask.Contains(Fixture.X) && EntityMask.Contains(Fixture.Y));
 	}
 
-	for (UNarrativeDataAsset* Asset : {Created, CreatedEntity})
+	// The wizard's path: a chosen name and fields authored inside the create's own undo step.
+	UNarrativeDataAsset* Named = Model.CreateAsset(UNarrativeDialogDef::StaticClass(), FVector(5, 6, 0), TEXT("DA_Test_NamedCard"),
+		[](UNarrativeDataAsset& Asset) { CastChecked<UNarrativeDialogDef>(&Asset)->Strength = 0.25f; });
+	if (TestNotNull(TEXT("Make New creates a named card"), Named))
+	{
+		TestEqual(TEXT("The card takes the name asked for"), Named->GetName(), FString(TEXT("DA_Test_NamedCard")));
+		TestEqual(TEXT("Initialize authors the card"), CastChecked<UNarrativeDialogDef>(Named)->Strength, 0.25f);
+		TestEqual(TEXT("Initialize does not stop the mask"), CastChecked<UNarrativeDialogDef>(Named)->Mask.Num(), 2);
+	}
+	UNarrativeDataAsset* NamedAgain = Model.CreateAsset(UNarrativeDialogDef::StaticClass(), FVector(5, 6, 0), TEXT("DA_Test_NamedCard"));
+	if (TestNotNull(TEXT("Make New creates a second card of the same name"), NamedAgain))
+	{
+		TestNotEqual(TEXT("A taken name is made unique"), NamedAgain->GetName(), FString(TEXT("DA_Test_NamedCard")));
+	}
+
+	for (UNarrativeDataAsset* Asset : {Created, CreatedEntity, Named, NamedAgain})
 	{
 		if (!Asset) { continue; }
 		if (UNarrativeDataSubsystem* Catalog = GEngine->GetEngineSubsystem<UNarrativeDataSubsystem>()) { Catalog->UnregisterAsset(Asset); }

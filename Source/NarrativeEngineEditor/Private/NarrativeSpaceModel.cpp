@@ -276,7 +276,8 @@ TArray<UClass*> FNarrativeSpaceModel::GetCreatableClasses()
 	return Result;
 }
 
-UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVector& Position)
+UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVector& Position, const FString& DesiredName,
+	TFunctionRef<void(UNarrativeDataAsset&)> Initialize)
 {
 	if (!CanCreateAssets() || !Class || !Class->IsChildOf(UNarrativeDataAsset::StaticClass()))
 	{
@@ -303,13 +304,14 @@ UNarrativeDataAsset* FNarrativeSpaceModel::CreateAsset(UClass* Class, const FVec
 	FString PackageName;
 	FString AssetName;
 	FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get()
-		.CreateUniqueAssetName(Path / (TEXT("New") + BaseName), TEXT(""), PackageName, AssetName);
+		.CreateUniqueAssetName(Path / (DesiredName.IsEmpty() ? TEXT("New") + BaseName : DesiredName), TEXT(""), PackageName, AssetName);
 
 	UPackage* Package = CreatePackage(*PackageName);
 	if (!Package) { return nullptr; }
 	UNarrativeDataAsset* Asset = NewObject<UNarrativeDataAsset>(Package, Class, *AssetName,
 		RF_Public | RF_Standalone | RF_Transactional);
 	if (!Asset) { return nullptr; }
+	Initialize(*Asset);
 
 	// Author the placement before Refresh reads positions back out of the asset.
 	if (FStructProperty* Property = ResolvePlacement(Asset))

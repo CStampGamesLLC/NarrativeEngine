@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "NarrativeLints.h"
 
 class UNarrativeBasisVector;
@@ -54,4 +55,13 @@ namespace NarrativeDialogEditing
 
 	/** The tiers from narrowest reach to widest, the order the reach bar draws them. */
 	TConstArrayView<ENarrativeTier> TiersByReach();
+
+	/** A phrase as one PascalCase word for an asset name: "I've prepared you!" reads IvePreparedYou. */
+	FString CollapsePhrase(const FString& Phrase, int32 MaxLength = 48);
+
+	/** A card's one-word label from its family: the tag's leaf, so Dialog.Family.Item.Give reads Give. */
+	FString LabelFromFamily(const FGameplayTag& Family);
+
+	/** DA_<Label>_<CollapsedPhrase>, either part dropped when empty. Not made unique. */
+	FString CardAssetName(const FString& Phrase, const FGameplayTag& Family);
 }

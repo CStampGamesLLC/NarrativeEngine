@@ -2,6 +2,9 @@
 
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "Editor.h"
+#include "NarrativeDialogWizard.h"
+#include "NarrativeStaticData.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Framework/Application/IMenu.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -773,9 +776,12 @@ void SNarrativeSpaceViewport::BuildMakeNewMenu(FMenuBuilder& Builder, FVector2D 
 	for (UClass* Class : Classes)
 	{
 		const FText Name = Class->GetDisplayNameText();
+		const bool bWizard = Class->IsChildOf(UNarrativeDialogDef::StaticClass());
 		Builder.AddMenuEntry(
-			Name,
-			FText::Format(LOCTEXT("MakeNewClassTip", "Create a new {0} here."), Name),
+			bWizard ? FText::Format(LOCTEXT("MakeNewWizard", "{0}..."), Name) : Name,
+			bWizard
+				? FText::Format(LOCTEXT("MakeNewWizardTip", "Create a new {0} here: name it by its phrase and family, and set its deed, in one step."), Name)
+				: FText::Format(LOCTEXT("MakeNewClassTip", "Create a new {0} here."), Name),
 			FSlateIcon(),
 			FUIAction(
 				FExecuteAction::CreateSP(this, &SNarrativeSpaceViewport::CreateAssetAt, TWeakObjectPtr<UClass>(Class), At),
@@ -785,7 +791,22 @@ void SNarrativeSpaceViewport::BuildMakeNewMenu(FMenuBuilder& Builder, FVector2D 
 
 void SNarrativeSpaceViewport::CreateAssetAt(TWeakObjectPtr<UClass> Class, FVector2D At)
 {
-	if (Class.IsValid()) { Model->CreateAsset(Class.Get(), Camera.Unproject(At, ViewportSize)); }
+	if (!Class.IsValid()) { return; }
+	// Unproject now: the modal wizard below lets the camera's view size change underneath.
+	const FVector Position = Camera.Unproject(At, ViewportSize);
+	if (!Class->IsChildOf(UNarrativeDialogDef::StaticClass()))
+	{
+		Model->CreateAsset(Class.Get(), Position);
+		return;
+	}
+
+	// A dialog card takes its name, label and deed from the wizard; the folder and position stay implied.
+	const TStrongObjectPtr<UNarrativeDialogWizardInput> Input(NewObject<UNarrativeDialogWizardInput>(GetTransientPackage()));
+	if (!NarrativeDialogWizard::Run(SharedThis(this), *Input) || !Class.IsValid()) { return; }
+	Model->CreateAsset(Class.Get(), Position, Input->AssetName(), [&Input](UNarrativeDataAsset& Asset)
+	{
+		Input->Apply(*CastChecked<UNarrativeDialogDef>(&Asset));
+	});
 }
 
 void SNarrativeSpaceViewport::DeleteSelection()

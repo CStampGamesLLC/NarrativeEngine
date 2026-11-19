@@ -8,6 +8,7 @@
 #include "Misc/AutomationTest.h"
 #include "NarrativeCoreData.h"
 #include "NarrativeLints.h"
+#include "NarrativeDialogWizard.h"
 #include "NarrativeStaticData.h"
 #include "PropertyEditorModule.h"
 #include "SNarrativeReachBar.h"
@@ -186,6 +187,49 @@ bool FNarrativeDialogDetailsViewTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Tidy edits the card"), Card->Location.Num(), 0);
 	GEditor->UndoTransaction();
 	TestEqual(TEXT("Tidy undoes as one step"), Card->Location.Num(), 1);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeDialogWizardNamingTest, "Narrative.DialogDetails.WizardNaming",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNarrativeDialogWizardNamingTest::RunTest(const FString& Parameters)
+{
+	using namespace NarrativeDialogEditing;
+	TestEqual(TEXT("Apostrophes join a word"), CollapsePhrase(TEXT("I've prepared you!")), FString(TEXT("IvePreparedYou")));
+	TestEqual(TEXT("Hyphens and spaces split words"), CollapsePhrase(TEXT("good-for-nothing  wretch")), FString(TEXT("GoodForNothingWretch")));
+	TestEqual(TEXT("Wild card braces split words"), CollapsePhrase(TEXT("Take this {Item.Name}.")), FString(TEXT("TakeThisItemName")));
+	TestEqual(TEXT("Typed capitals are kept"), CollapsePhrase(TEXT("the RICK way")), FString(TEXT("TheRICKWay")));
+	TestEqual(TEXT("Non-ASCII is dropped"), CollapsePhrase(TEXT("caf\u00E9 ol\u00E9")), FString(TEXT("CafOl")));
+	TestEqual(TEXT("Collapsed phrases are capped"), CollapsePhrase(TEXT("a b c d e f"), 3), FString(TEXT("ABC")));
+	TestEqual(TEXT("No family, no label"), LabelFromFamily(FGameplayTag()), FString());
+	TestEqual(TEXT("Nothing usable still names the card"), CardAssetName(TEXT("?!"), FGameplayTag()), FString(TEXT("DA_NewDialog")));
+	TestEqual(TEXT("No family drops the label"), CardAssetName(TEXT("Hello there"), FGameplayTag()), FString(TEXT("DA_HelloThere")));
+
+	const FGameplayTag Give = FGameplayTag::RequestGameplayTag(TEXT("Dialog.Family.Item.Give"), false);
+	if (!Give.IsValid())
+	{
+		AddWarning(TEXT("Dialog.Family.Item.Give is not registered; the family half of the naming test is skipped."));
+		return true;
+	}
+	TestEqual(TEXT("Label is the family's leaf"), LabelFromFamily(Give), FString(TEXT("Give")));
+	TestEqual(TEXT("Asset name is DA_Label_Phrase"), CardAssetName(TEXT("I've prepared you"), Give), FString(TEXT("DA_Give_IvePreparedYou")));
+
+	const TStrongObjectPtr<UNarrativeDialogWizardInput> Input(NewObject<UNarrativeDialogWizardInput>());
+	Input->Phrase = FText::FromString(TEXT("I've prepared you"));
+	Input->Family = Give;
+	Input->SpaceSigma = 9.f;
+	Input->Strength = 1000.f;
+	Input->Stance = -1;
+	Input->Cooldown = 12.f;
+	const TStrongObjectPtr<UNarrativeDialogDef> Card(NewObject<UNarrativeDialogDef>());
+	Input->Apply(*Card);
+	TestEqual(TEXT("Apply sets the phrase"), Card->Phrase.ToString(), Input->Phrase.ToString());
+	TestEqual(TEXT("Apply infers the label"), Card->Label.ToString(), FString(TEXT("Give")));
+	TestEqual(TEXT("Apply sets the family"), Card->Family, Give);
+	TestEqual(TEXT("Apply sets the reach"), Card->SpaceSigma, 9.f);
+	const TOptional<float> Cap = StrengthCap(9.f);
+	TestEqual(TEXT("Apply holds J to the reach's cap"), Card->Strength, Cap.IsSet() ? Cap.GetValue() : 1000.f);
+	TestEqual(TEXT("Apply sets the stance"), Card->Stance, -1);
+	TestEqual(TEXT("Apply sets the cooldown"), Card->Cooldown, 12.f);
 	return true;
 }
 #endif

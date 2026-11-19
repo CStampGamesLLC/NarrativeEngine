@@ -119,8 +119,11 @@ public:
 	/**
 	 * Creates an unsaved data asset of Class under the query's content path, places it at Position
 	 * and selects it. Null when the query, the class or its placement field will not allow it.
+	 * DesiredName names it (made unique with a number when taken); empty means New<Class>.
+	 * Initialize authors its fields inside the same undo step, before anything reads it.
 	 */
-	UNarrativeDataAsset* CreateAsset(UClass* Class, const FVector& Position);
+	UNarrativeDataAsset* CreateAsset(UClass* Class, const FVector& Position, const FString& DesiredName = FString(),
+		TFunctionRef<void(UNarrativeDataAsset&)> Initialize = [](UNarrativeDataAsset&) {});
 
 	/**
 	 * Deletes assets through the editor's own confirmation and reference check. Destructive and

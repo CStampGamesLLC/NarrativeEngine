@@ -148,6 +148,47 @@ namespace NarrativeDialogEditing
 		static const ENarrativeTier Tiers[] = {ENarrativeTier::Legendary, ENarrativeTier::Epic, ENarrativeTier::Rare, ENarrativeTier::Uncommon, ENarrativeTier::Common};
 		return Tiers;
 	}
+
+	FString CollapsePhrase(const FString& Phrase, int32 MaxLength)
+	{
+		FString Result;
+		bool bWordStart = true;
+		for (const TCHAR Char : Phrase)
+		{
+			// Apostrophes join a word ("I've" is one word), so they vanish without starting a new one.
+			if (Char == TEXT('\'') || Char == TEXT('\u2019') || Char == TEXT('`')) { continue; }
+			// Asset names stay ASCII; anything else (spaces, punctuation, wild card braces) splits words.
+			const bool bAscii = Char < 128 && FChar::IsAlnum(Char);
+			if (!bAscii)
+			{
+				bWordStart = true;
+				continue;
+			}
+			Result.AppendChar(bWordStart ? FChar::ToUpper(Char) : Char);
+			bWordStart = false;
+			if (Result.Len() >= MaxLength) { break; }
+		}
+		return Result;
+	}
+
+	FString LabelFromFamily(const FGameplayTag& Family)
+	{
+		if (!Family.IsValid()) { return FString(); }
+		FString Leaf = Family.GetTagName().ToString();
+		int32 Dot = INDEX_NONE;
+		if (Leaf.FindLastChar(TEXT('.'), Dot)) { Leaf.RightChopInline(Dot + 1); }
+		return CollapsePhrase(Leaf);
+	}
+
+	FString CardAssetName(const FString& Phrase, const FGameplayTag& Family)
+	{
+		FString Name = TEXT("DA");
+		const FString Label = LabelFromFamily(Family);
+		const FString Collapsed = CollapsePhrase(Phrase);
+		if (!Label.IsEmpty()) { Name += TEXT("_") + Label; }
+		if (!Collapsed.IsEmpty()) { Name += TEXT("_") + Collapsed; }
+		return Name == TEXT("DA") ? TEXT("DA_NewDialog") : Name;
+	}
 }
 
 #undef LOCTEXT_NAMESPACE
