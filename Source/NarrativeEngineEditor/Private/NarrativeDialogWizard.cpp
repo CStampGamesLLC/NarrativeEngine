@@ -9,6 +9,7 @@
 #include "Input/Reply.h"
 #include "InputCoreTypes.h"
 #include "NarrativeDialogEditing.h"
+#include "NarrativeDialogWizardExtension.h"
 #include "NarrativeLints.h"
 #include "NarrativeStaticData.h"
 #include "PropertyEditorModule.h"
@@ -56,8 +57,9 @@ namespace
 	class FWizardDetails : public IDetailCustomization
 	{
 	public:
-		FWizardDetails(FSimpleDelegate InOnAccept, TSharedRef<TSharedPtr<SWidget>> InFirstFocus)
-			: OnAccept(MoveTemp(InOnAccept)), FirstFocus(MoveTemp(InFirstFocus)) {}
+		FWizardDetails(FSimpleDelegate InOnAccept, TSharedRef<TSharedPtr<SWidget>> InFirstFocus,
+			TArray<TSharedRef<INarrativeDialogWizardExtension>> InExtensions)
+			: OnAccept(MoveTemp(InOnAccept)), FirstFocus(MoveTemp(InFirstFocus)), Extensions(MoveTemp(InExtensions)) {}
 
 		virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override
 		{
@@ -201,11 +203,18 @@ namespace
 			];
 
 			Category.AddProperty(CooldownHandle);
+
+			// Questions from modules this plugin cannot see, such as the game's facial performances.
+			for (const TSharedRef<INarrativeDialogWizardExtension>& Extension : Extensions)
+			{
+				Extension->AddRows(Category);
+			}
 		}
 
 	private:
 		FSimpleDelegate OnAccept;
 		TSharedRef<TSharedPtr<SWidget>> FirstFocus;
+		TArray<TSharedRef<INarrativeDialogWizardExtension>> Extensions;
 	};
 
 	/** Answers carried from one card to the next, so a run of cards in one family takes only phrases. */
@@ -253,8 +262,10 @@ namespace
 	};
 }
 
-bool NarrativeDialogWizard::Run(const TSharedPtr<SWidget>& Parent, UNarrativeDialogWizardInput& Input)
+bool NarrativeDialogWizard::Run(const TSharedPtr<SWidget>& Parent, UNarrativeDialogWizardInput& Input,
+	TArray<TSharedRef<INarrativeDialogWizardExtension>>& OutExtensions)
 {
+	OutExtensions = NarrativeDialogWizardExtensions::MakeAll();
 	const FCarryOver& Previous = CarryOver();
 	Input.Family = Previous.Family;
 	Input.SpaceSigma = Previous.SpaceSigma;
@@ -269,7 +280,7 @@ bool NarrativeDialogWizard::Run(const TSharedPtr<SWidget>& Parent, UNarrativeDia
 	TSharedRef<SWindow> Window = SNew(SWindow)
 		.Title(LOCTEXT("Title", "New Dialog Card"))
 		.SizingRule(ESizingRule::UserSized)
-		.ClientSize(FVector2D(560.f, 330.f))
+		.ClientSize(FVector2D(560.f, OutExtensions.IsEmpty() ? 330.f : 380.f))
 		.SupportsMinimize(false)
 		.SupportsMaximize(false);
 	const TWeakPtr<SWindow> WeakWindow = Window;
@@ -297,7 +308,10 @@ bool NarrativeDialogWizard::Run(const TSharedPtr<SWidget>& Parent, UNarrativeDia
 	const FSimpleDelegate AcceptDelegate = FSimpleDelegate::CreateLambda(Accept);
 	const TSharedRef<TSharedPtr<SWidget>> FirstFocus = MakeShared<TSharedPtr<SWidget>>();
 	Details->RegisterInstancedCustomPropertyLayout(UNarrativeDialogWizardInput::StaticClass(),
-		FOnGetDetailCustomizationInstance::CreateLambda([AcceptDelegate, FirstFocus] { return MakeShared<FWizardDetails>(AcceptDelegate, FirstFocus); }));
+		FOnGetDetailCustomizationInstance::CreateLambda([AcceptDelegate, FirstFocus, Extensions = OutExtensions]
+		{
+			return MakeShared<FWizardDetails>(AcceptDelegate, FirstFocus, Extensions);
+		}));
 	Details->SetObject(&Input);
 
 	Window->SetContent(

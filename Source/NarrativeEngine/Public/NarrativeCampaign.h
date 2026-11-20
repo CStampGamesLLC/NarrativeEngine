@@ -208,6 +208,12 @@ public:
 		const FVectorND& Location, const FNarrativeMask& Mask) const;
 
 	/**
+	 * Observer's approval of an act about Location on Mask, by its own values on the axes both are about (-1..1): the
+	 * term the commit weighs regard by. Unset when Observer has no mind. Never draws or advances time.
+	 */
+	TOptional<double> ReadApproval(const FNarrativeEntityId& Observer, const FVectorND& Location, const FNarrativeMask& Mask) const;
+
+	/**
 	 * ForecastLine's regard -> affinity -> stance chain for a regard change the caller valued itself: a player-facing
 	 * preview values the line by what the speaker believes of Observer, never by Observer's true position as ForecastLine does.
 	 */

@@ -5,6 +5,7 @@
 #include "UObject/Object.h"
 #include "NarrativeDialogWizard.generated.h"
 
+class INarrativeDialogWizardExtension;
 class SWidget;
 class UNarrativeDialogDef;
 
@@ -54,6 +55,9 @@ namespace NarrativeDialogWizard
 	/**
 	 * Opens the wizard as a modal window over Parent and blocks until it closes. True when the author pressed
 	 * Create, with Input holding the answers. Answers other than the phrase carry over to the next card.
+	 * OutExtensions are the registered extensions that asked their own questions this run; call each one's
+	 * OnCardCreated once the card exists.
 	 */
-	bool Run(const TSharedPtr<SWidget>& Parent, UNarrativeDialogWizardInput& Input);
+	bool Run(const TSharedPtr<SWidget>& Parent, UNarrativeDialogWizardInput& Input,
+		TArray<TSharedRef<INarrativeDialogWizardExtension>>& OutExtensions);
 }

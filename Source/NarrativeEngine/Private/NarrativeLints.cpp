@@ -163,6 +163,7 @@ namespace NarrativeLints
 			{TEXT("EndDialog"), TEXT("Dialog.Family.Depart")},
 			{TEXT("GiveItem"), TEXT("Dialog.Family.Item.Give")},
 			{TEXT("Recruit"), TEXT("Dialog.Family.Recruit")},
+			{TEXT("RequestItem"), TEXT("Dialog.Family.Item.Request")},
 		};
 		for (const FGameplayTag& Tag : Card.AbilityTags)
 		{

@@ -35,16 +35,21 @@ ENUM_CLASS_FLAGS(ENarrativeDialogTarget);
 UENUM(BlueprintType)
 enum class ENarrativeOutcomePolicy : uint8
 {
-	/** From the card's mechanic tag: GiveItem a gift, Recruit a request, EndDialog a farewell, else a line. */
+	/** From the card's mechanic tag: GiveItem a gift, Recruit a recruit, RequestItem an item request, EndDialog a farewell, else a line. */
 	Auto,
 	/** The line carries the deed, as every card without a mechanic does. */
 	Line,
 	/** The line carries J = 0; the transfer carries the card's J, once, as the line's child. */
 	Gift,
-	/** Both the line and its outcome carry J = 0 (MD7): an invitation awards no goodwill. */
-	Request,
+	/** Asks the addressee into the party. Both the line and its outcome carry J = 0 (MD7): an invitation awards no goodwill. */
+	Recruit,
 	/** The line only; it ends the conversation. */
 	Farewell,
+	/**
+	 * Asks the addressee for an item. The line carries its own J like any line. Legal only while the addressee could
+	 * legally give the speaker something the card asks for; how well the ask lands makes their gift likelier.
+	 */
+	RequestItem,
 };
 
 /**

@@ -76,7 +76,9 @@ namespace NarrativeChoice
 
 		double UtilityAt(const FParams& Params, const FPhrasing& Phrasing, double Affinity, TConstArrayView<double> Location)
 		{
-			return ResonanceAt(Phrasing, Location) + RelevanceAt(Params, Phrasing, Location) + Params.Lambda * Phrasing.Stance * Affinity;
+			// UtilityBias is constant in the card's location, but it is part of u_y, so every solve must carry it.
+			return ResonanceAt(Phrasing, Location) + RelevanceAt(Params, Phrasing, Location) + Params.Lambda * Phrasing.Stance * Affinity
+				+ Phrasing.UtilityBias;
 		}
 
 		/* w_i: how fast relevance falls per squared unit off the belief on axis i. Relevance = ceiling - Σ w_i (μ_i - l_i)². */
@@ -939,7 +941,7 @@ namespace NarrativeChoice
 				}
 				const double Resonance = ResonanceAt(Card, Location);
 				const bool bCardInReach = FMath::Exp(Resonance) >= Params.ReachFloor;
-				const double Logit = Beta * (Resonance + RelevanceAt(Params, Card, Location) + Params.Lambda * Card.Stance * Affinity);
+				const double Logit = Beta * (Resonance + RelevanceAt(Params, Card, Location) + Params.Lambda * Card.Stance * Affinity + Card.UtilityBias);
 				const bool bAnyInReach = (bCardLegal && bCardInReach) || OtherInReach.Contains(true);
 
 				TArray<double, TInlineAllocator<16>> Scored;

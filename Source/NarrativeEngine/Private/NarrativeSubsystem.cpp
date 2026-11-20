@@ -549,7 +549,11 @@ ENarrativeOutcomePolicy UNarrativeDialogDef::GetOutcomePolicy() const
 	}
 	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.Recruit")))
 	{
-		return ENarrativeOutcomePolicy::Request;
+		return ENarrativeOutcomePolicy::Recruit;
+	}
+	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.RequestItem")))
+	{
+		return ENarrativeOutcomePolicy::RequestItem;
 	}
 	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.EndDialog")))
 	{

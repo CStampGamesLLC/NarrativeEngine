@@ -3,6 +3,7 @@
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "Editor.h"
 #include "NarrativeDialogWizard.h"
+#include "NarrativeDialogWizardExtension.h"
 #include "NarrativeStaticData.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Framework/Application/IMenu.h"
@@ -802,11 +803,28 @@ void SNarrativeSpaceViewport::CreateAssetAt(TWeakObjectPtr<UClass> Class, FVecto
 
 	// A dialog card takes its name, label and deed from the wizard; the folder and position stay implied.
 	const TStrongObjectPtr<UNarrativeDialogWizardInput> Input(NewObject<UNarrativeDialogWizardInput>(GetTransientPackage()));
-	if (!NarrativeDialogWizard::Run(SharedThis(this), *Input) || !Class.IsValid()) { return; }
-	Model->CreateAsset(Class.Get(), Position, Input->AssetName(), [&Input](UNarrativeDataAsset& Asset)
+	TArray<TSharedRef<INarrativeDialogWizardExtension>> Extensions;
+	if (!NarrativeDialogWizard::Run(SharedThis(this), *Input, Extensions) || !Class.IsValid()) { return; }
+	const UNarrativeDataAsset* Created = Model->CreateAsset(Class.Get(), Position, Input->AssetName(), [&Input, &Extensions](UNarrativeDataAsset& Asset)
 	{
-		Input->Apply(*CastChecked<UNarrativeDialogDef>(&Asset));
+		UNarrativeDialogDef& Card = *CastChecked<UNarrativeDialogDef>(&Asset);
+		Input->Apply(Card);
+		// Inside the create's undo step, so whatever an extension changes (a face catalog row) undoes with the card.
+		for (const TSharedRef<INarrativeDialogWizardExtension>& Extension : Extensions)
+		{
+			Extension->OnCardCreated(Card);
+		}
 	});
+	if (Created)
+	{
+		// Whatever the extensions changed alongside the card is saved with it.
+		TArray<UPackage*> Companions;
+		for (const TSharedRef<INarrativeDialogWizardExtension>& Extension : Extensions)
+		{
+			Extension->GatherModifiedPackages(Companions);
+		}
+		Model->AddCompanionPackages(Companions);
+	}
 }
 
 void SNarrativeSpaceViewport::DeleteSelection()

@@ -915,7 +915,29 @@ void FNarrativeSpaceModel::Save()
 	if (!CanEdit() || IsDragging()) { return; }
 	TArray<UPackage*> Packages;
 	for (UNarrativeDataAsset* Asset : LoadedAssets) { if (Asset->GetPackage()->IsDirty()) { Packages.AddUnique(Asset->GetPackage()); } }
+	for (const TWeakObjectPtr<UPackage>& Companion : CompanionPackages)
+	{
+		if (UPackage* Package = Companion.Get(); Package && Package->IsDirty())
+		{
+			Packages.AddUnique(Package);
+		}
+	}
+	CompanionPackages.RemoveAll([](const TWeakObjectPtr<UPackage>& Companion)
+	{
+		return !Companion.IsValid() || !Companion->IsDirty();
+	});
 	if (!Packages.IsEmpty()) { FEditorFileUtils::PromptForCheckoutAndSave(Packages, true, true); }
+}
+
+void FNarrativeSpaceModel::AddCompanionPackages(TConstArrayView<UPackage*> Packages)
+{
+	for (UPackage* Package : Packages)
+	{
+		if (Package)
+		{
+			CompanionPackages.AddUnique(Package);
+		}
+	}
 }
 
 void FNarrativeSpaceModel::OpenSelection()

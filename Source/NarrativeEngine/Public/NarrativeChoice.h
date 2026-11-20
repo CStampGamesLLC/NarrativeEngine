@@ -62,6 +62,9 @@ namespace NarrativeChoice
 		/** ℓ_y - x̂_L on every axis of the space, for the Offer's directional repulsion (spec §5.2). Empty: no repulsion. */
 		TArray<double> Direction;
 
+		/** Utility the game adds outside the model, such as an item request's sway on the gifts that could answer it. 0: none. */
+		double UtilityBias = 0.0;
+
 		bool IsLegal() const { return IllegalCheck == 0; }
 	};
 
@@ -81,6 +84,9 @@ namespace NarrativeChoice
 
 		/** λ h_y Ã. */
 		double StanceTerm = 0.0;
+
+		/** FPhrasing::UtilityBias, as it entered u_y. */
+		double Bias = 0.0;
 
 		double Utility = 0.0;
 

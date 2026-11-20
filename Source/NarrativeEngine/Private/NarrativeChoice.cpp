@@ -117,7 +117,8 @@ namespace NarrativeChoice
 			Terms.Relevance = LogExpectedReachPow(In.BeliefMean, In.BeliefVariance, In.Location, In.Sigma, Beta * Params.Eta) / Beta;
 
 			Terms.StanceTerm = Params.Lambda * In.Stance * Affinity;
-			Terms.Utility = Terms.Resonance + Terms.Relevance + Terms.StanceTerm;
+			Terms.Bias = In.UtilityBias;
+			Terms.Utility = Terms.Resonance + Terms.Relevance + Terms.StanceTerm + Terms.Bias;
 			Logits.Add(Beta * Terms.Utility);
 		}
 

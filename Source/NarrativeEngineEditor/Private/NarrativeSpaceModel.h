@@ -131,6 +131,9 @@ public:
 	 */
 	int32 DeleteAssets(const TArray<UNarrativeDataAsset*>& Assets, bool bShowConfirmation = true);
 
+	/** Packages a creation changed besides its asset (a face catalog row). Save offers them, while they are dirty. */
+	void AddCompanionPackages(TConstArrayView<UPackage*> Packages);
+
 	/**
 	 * Copies each asset into its own folder under a fresh name, keeping the copy's authored values
 	 * and selects the copies. Each copy is moved by WorldOffset along the plotted axes its original
@@ -198,6 +201,7 @@ private:
 	/** Everything Make New produced this session, kept alive so undo and redo can toggle it. */
 	TArray<TObjectPtr<UNarrativeDataAsset>> CreatedAssets;
 	TSet<TWeakObjectPtr<UNarrativeDataAsset>> LiveCreated;
+	TArray<TWeakObjectPtr<UPackage>> CompanionPackages;
 	FText Status;
 	/** How many points the last read took from the simulation rather than from their asset. */
 	int32 LiveCount = 0;

@@ -1222,6 +1222,19 @@ FNarrativeAffinityForecast FNarrativeCampaign::ForecastLine(const FNarrativeEnti
 		Strength > 0.0 ? NarrativeMath::RegardDelta(Strength, Stance, 1.0, ApprovalOf(*Mind, Line), FMath::Max(1.0, static_cast<double>(Self->Mass))) : 0.0);
 }
 
+TOptional<double> FNarrativeCampaign::ReadApproval(const FNarrativeEntityId& Observer, const FVectorND& Location, const FNarrativeMask& Mask) const
+{
+	const FNarrativeMind* Mind = Minds.Find(Observer);
+	if (!Mind)
+	{
+		return {};
+	}
+	FNarrativeEvent Act;
+	Act.Location = Location;
+	Act.Mask = Mask;
+	return ApprovalOf(*Mind, Act);
+}
+
 FNarrativeAffinityForecast FNarrativeCampaign::ForecastRegardDelta(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Speaker, double RegardDelta) const
 {
 	FNarrativeAffinityForecast Forecast;
