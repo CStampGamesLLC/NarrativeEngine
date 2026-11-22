@@ -5,7 +5,10 @@
 #include "AssetViewUtils.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
-#include "Editor/EditorEngineDelegates.h"
+#include "Misc/EngineVersionComparison.h"
+#if !UE_VERSION_OLDER_THAN(6, 0, 0)
+#include "Editor/EditorEngineDelegates.h" // UE6 split these out of Editor.h
+#endif
 #include "FileHelpers.h"
 #include "Misc/PackageName.h"
 #include "NarrativeCoreData.h"
@@ -177,8 +180,13 @@ FNarrativeSpaceModel::FNarrativeSpaceModel()
 	Registry.OnFilesLoaded().AddRaw(this, &FNarrativeSpaceModel::RegistryReady);
 	FCoreUObjectDelegates::OnObjectPropertyChanged.AddRaw(this, &FNarrativeSpaceModel::PropertyChanged);
 	FCoreUObjectDelegates::OnObjectsReplaced.AddRaw(this, &FNarrativeSpaceModel::ObjectsReplaced);
+#if UE_VERSION_OLDER_THAN(6, 0, 0)
+	PlayStartedHandle = FEditorDelegates::PostPIEStarted.AddRaw(this, &FNarrativeSpaceModel::PlaySessionChanged);
+	PlayEndedHandle = FEditorDelegates::EndPIE.AddRaw(this, &FNarrativeSpaceModel::PlaySessionChanged);
+#else
 	PlayStartedHandle = UE::Editor::PIE::OnPostStarted.AddRaw(this, &FNarrativeSpaceModel::PlaySessionChanged);
 	PlayEndedHandle = UE::Editor::PIE::OnEnd.AddRaw(this, &FNarrativeSpaceModel::PlaySessionChanged);
+#endif
 }
 
 FNarrativeSpaceModel::~FNarrativeSpaceModel()
@@ -186,8 +194,13 @@ FNarrativeSpaceModel::~FNarrativeSpaceModel()
 	EndDrag(true);
 	FCoreUObjectDelegates::OnObjectPropertyChanged.RemoveAll(this);
 	FCoreUObjectDelegates::OnObjectsReplaced.RemoveAll(this);
+#if UE_VERSION_OLDER_THAN(6, 0, 0)
+	FEditorDelegates::PostPIEStarted.Remove(PlayStartedHandle);
+	FEditorDelegates::EndPIE.Remove(PlayEndedHandle);
+#else
 	UE::Editor::PIE::OnPostStarted.Remove(PlayStartedHandle);
 	UE::Editor::PIE::OnEnd.Remove(PlayEndedHandle);
+#endif
 	if (FAssetRegistryModule* Module = FModuleManager::GetModulePtr<FAssetRegistryModule>("AssetRegistry"))
 	{
 		Module->Get().OnAssetAdded().RemoveAll(this);

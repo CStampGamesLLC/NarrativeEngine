@@ -16,6 +16,7 @@
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Misc/EngineVersionComparison.h"
 
 namespace NarrativeDialogDetailsTests
 {
@@ -142,6 +143,9 @@ bool FNarrativeDialogReachTiersTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Walks the details panel with IDetailsView::GetRootTreeNodes(), which only exists on UE6; on 5.8 this needs
+// porting to IPropertyRowGenerator, so it is compiled out there.
+#if !UE_VERSION_OLDER_THAN(6, 0, 0)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeDialogDetailsViewTest, "Narrative.DialogDetails.View",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FNarrativeDialogDetailsViewTest::RunTest(const FString& Parameters)
@@ -189,6 +193,7 @@ bool FNarrativeDialogDetailsViewTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Tidy undoes as one step"), Card->Location.Num(), 1);
 	return true;
 }
+#endif // !UE_VERSION_OLDER_THAN(6, 0, 0)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNarrativeDialogWizardNamingTest, "Narrative.DialogDetails.WizardNaming",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FNarrativeDialogWizardNamingTest::RunTest(const FString& Parameters)

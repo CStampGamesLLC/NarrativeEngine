@@ -1,6 +1,9 @@
 #include "NarrativeStaticData.h"
+#include "Misc/EngineVersionComparison.h"
 
-#if WITH_DEV_AUTOMATION_TESTS
+// These tests walk the details panel with IDetailsView::GetRootTreeNodes(), which only exists on UE6.
+// On 5.8 they need porting to IPropertyRowGenerator; until then they are compiled out.
+#if WITH_DEV_AUTOMATION_TESTS && !UE_VERSION_OLDER_THAN(6, 0, 0)
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
 #include "IDetailsView.h"

@@ -4,6 +4,7 @@
 #include "NarrativeVectorLegacy.h"
 #include "NarrativeVectorTestTypes.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
@@ -86,7 +87,11 @@ bool FNarrativeVectorSerializationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Axis order survives"), Loaded.GetBasis() == Original.GetBasis());
 	TestTrue(TEXT("Dense values survive, including explicit zero"), Loaded.GetCoordinates() == Original.GetCoordinates());
 	TestFalse(TEXT("New format is not legacy"), Loaded.WasLoadedFromLegacyMap());
+#if UE_VERSION_OLDER_THAN(6, 0, 0)
+	TestFalse(TEXT("Unloaded reference stays unloaded"), A.Get() != nullptr); // 5.8 TSoftObjectPtr has no IsLoaded()
+#else
 	TestFalse(TEXT("Unloaded reference stays unloaded"), A.IsLoaded());
+#endif
 	FString Text;
 	FVectorND::StaticStruct()->ExportText(Text, &Original, nullptr, nullptr, PPF_None, nullptr);
 	FVectorND Pasted;
