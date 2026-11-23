@@ -36,6 +36,9 @@ enum class ENarrativeEventKind : uint8
 	WarningSeen,
 	/* An explicit Silence: the speaker chose to say nothing (D6). J = 0 always: it moves no regard, and it is the outcome P2 learns from. */
 	Silence,
+	/* A member left the party (TDD Pattern 20): its betrayal's one valuation unit, keyed by the tell it completes. Its
+	 * meaning (ℓ, M, J) is authored content; until then J = 0 and it moves no one's regard. */
+	Departure,
 };
 
 UENUM()

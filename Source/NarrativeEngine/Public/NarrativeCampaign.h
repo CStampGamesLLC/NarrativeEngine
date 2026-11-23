@@ -5,6 +5,7 @@
 #include "NarrativeEvent.h"
 #include "NarrativeIds.h"
 #include "NarrativeMind.h"
+#include "NarrativeParty.h"
 
 class UNarrativeEntityDef;
 
@@ -14,6 +15,8 @@ DECLARE_MULTICAST_DELEGATE_FiveParams(FOnNarrativeStanceDecided, const FNarrativ
 	ENarrativeStance /*Old*/, ENarrativeStance /*New*/, int64 /*Tick*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnNarrativeTell, const FNarrativeEntityId& /*Observer*/, const FNarrativeEntityId& /*Subject*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnNarrativeEventCommitted, const FNarrativeEvent&);
+/* The party record changed: a join (bJoined), a departure (with its reason), or a reorder or whole install (Member unset). */
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnNarrativePartyChanged, const FNarrativeEntityId& /*Member*/, bool /*bJoined*/, ENarrativeDepartureReason /*Reason*/);
 
 /** Where FNarrativeCampaign::ReadBelief's answer came from. */
 enum class ENarrativeBeliefSource : uint8
@@ -45,6 +48,8 @@ struct NARRATIVEENGINE_API FNarrativeCampaignHeader
 	/* Activations (a delivered line, a swing, a gift) take ids from here, so they never repeat within the
 	 * campaign however many worlds come and go: the dedup history lives exactly as long. */
 	uint64 LastActivationId = 0;
+	/* Bumped by every export: the game save stores it beside its actor half, and a load refuses a pair that disagrees. */
+	uint64 CheckpointId = 0;
 };
 
 /** Counters the Mind panel and the determinism tests read. */
@@ -239,8 +244,9 @@ public:
 	uint32 ComputeStateHash(bool bIncludeClockDebt = false) const;
 	/* Versioned domain checkpoint. Import validates a temporary campaign before replacing truth;
 	 * view bindings and subscribers are owned outside this payload and remain intact. */
-	bool ExportCheckpoint(TArray<uint8>& Bytes) const;
-	bool ImportCheckpoint(const TArray<uint8>& Bytes, FString& Error);
+	bool ExportCheckpoint(TArray<uint8>& Bytes, uint64* OutCheckpointId = nullptr) const;
+	/* ExpectedCheckpointId 0 accepts any (a save written before checkpoint ids). */
+	bool ImportCheckpoint(const TArray<uint8>& Bytes, FString& Error, uint64 ExpectedCheckpointId = 0);
 	bool IsCommitting() const
 	{
 		return bPumping;
@@ -267,13 +273,66 @@ public:
 	 * advances narrative time by exactly Seconds (one decision interval) and seals it, so the addressee judges each line
 	 * before it answers. False, advancing nothing, while any producer holds a tick; OutHeldBy names it.
 	 */
-	bool AdvanceBeat(double Seconds, FString* OutHeldBy = nullptr);
+	bool AdvanceBeat(double Seconds, FString* OutHeldBy = nullptr, const FNarrativeBeatContext* Beat = nullptr);
 #pragma endregion
 
 #pragma region Game hooks
 	/** The party, as the roster now stands: each member with a mind keeps every other member pinned. */
 	void SetPartyPins(const TArray<FNarrativeEntityId>& Members);
+#pragma endregion
 
+#pragma region Party
+	/**
+	 * The player's party by entity id (TDD Patterns 20, 21). Actors are views of it: EndPlay, streaming and loading only
+	 * detach them, so none of those is a departure.
+	 */
+	const FNarrativePartyRecord& GetParty() const { return Party; }
+	bool IsPartyMember(const FNarrativeEntityId& Id) const { return Id.IsValid() && Party.Members.Contains(Id); }
+	bool AreCoMembers(const FNarrativeEntityId& A, const FNarrativeEntityId& B) const { return A != B && IsPartyMember(A) && IsPartyMember(B); }
+
+	/** Member, PendingBetrayal (an active tell toward a fellow member), or NotMember. */
+	ENarrativeMemberState GetMemberState(const FNarrativeEntityId& Id) const;
+
+	/** The pending betrayal's tell, toward the member it is actually Hostile toward. Null unless PendingBetrayal. */
+	const FNarrativeTell* FindPendingBetrayal(const FNarrativeEntityId& Id, FNarrativeEntityId* OutSubject = nullptr) const;
+
+	/** A roster installed whole, as a load or the starting gather finds it: no join, no departure, no event; pins follow. */
+	void InstallParty(const TArray<FNarrativeEntityId>& Members);
+
+	/** A join the game committed (recruitment, a scripted join). Slot below zero appends. False if already a member. */
+	bool JoinParty(const FNarrativeEntityId& Id, int32 Slot = INDEX_NONE);
+
+	/** A departure the game committed (dismissal, death). Betrayal is the campaign's own decision; see the grace. */
+	bool LeaveParty(const FNarrativeEntityId& Id, ENarrativeDepartureReason Reason);
+
+	/** A reorder. False when Id is not a member or nothing moved. */
+	bool MovePartyMember(const FNarrativeEntityId& Id, int32 Slot);
+
+	/** K: Hostile decisions after the seen warning before a betrayal removes the member (TDD Pattern 20; K=1 Candidate). */
+	void SetBetrayalGrace(int32 K) { BetrayalGrace = FMath::Max(1, K); }
+	int32 GetBetrayalGrace() const { return BetrayalGrace; }
+
+	/** Whether a grace runs and a betrayal can commit at all: the game turns it on with its Party feature (P1), so earlier
+	 * presets keep their baseline. Off by default. */
+	void SetDeparturesEnabled(bool bEnabled) { bDeparturesEnabled = bEnabled; }
+	bool AreDeparturesEnabled() const { return bDeparturesEnabled; }
+
+	/** J of a betrayal's Departure deed (h = -1, the betrayed's mass scales it): what the betrayed and the rest of the party
+	 * hold against the betrayer. */
+	void SetBetrayalStrength(float J) { BetrayalStrength = FMath::Max(0.f, J); }
+
+	/** The player's own character: never departs by betrayal or death. Invalid clears it. */
+	void SetPartyPlayerCharacter(const FNarrativeEntityId& Id) { Party.PlayerCharacter = Id; }
+
+	/** Who perceived a deed the campaign itself commits (a betrayal): the game's perception rules append witnesses to the
+	 * fact's recipients. Unset, only the participants value it. Configuration, kept across Reset and loads. */
+	void SetWitnessResolver(TFunction<void(FNarrativeEvent&)> Resolver) { WitnessResolver = MoveTemp(Resolver); }
+
+	/** See FNarrativePartyRecord::bProvisional. */
+	void SetPartyProvisional(bool bProvisional) { Party.bProvisional = bProvisional; }
+#pragma endregion
+
+#pragma region Game hooks (threat)
 	/** Source threatens Observer until UntilTick: pinned so long. Every new threat fact extends it. */
 	void PinThreat(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Source, int64 UntilTick);
 	void UnpinThreat(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Source);
@@ -305,6 +364,7 @@ public:
 	FOnNarrativeTell OnTellCancelled;
 	FOnNarrativeTell OnWarningSeen;
 	FOnNarrativeEventCommitted OnEventCommitted;
+	FOnNarrativePartyChanged OnPartyChanged;
 
 private:
 	void SerializeCheckpoint(FArchive& Archive);
@@ -335,6 +395,13 @@ private:
 	double ApprovalOf(const FNarrativeMind& Mind, const FNarrativeEvent& Fact) const;
 
 	void FlushNotifications();
+
+	/* The grace's bookkeeping for one decision about a fellow member; true when the betrayal must now commit. */
+	bool AdvanceGrace(const FNarrativeMind& Mind, FNarrativeRelation& Relation, ENarrativeStance Old, ENarrativeStance New, int64 Tick) const;
+	/* Removes Member and emits its betrayal's one Departure fact, keyed by the tell it completes. */
+	void CommitBetrayal(const FNarrativeEntityId& Member, const FNarrativeEntityId& Subject, const FNarrativeTell& Tell, int64 Tick);
+	/* Party records changed: pins follow, the revision bumps, listeners hear after the pump. */
+	void NoteParty(const FNarrativeEntityId& Member, bool bJoined, ENarrativeDepartureReason Reason);
 
 	FNarrativeCampaignHeader Header;
 	FNarrativeCampaignStats Stats;
@@ -371,7 +438,23 @@ private:
 	TArray<FStanceNotice> StanceNotices;
 	TArray<FTellNotice> TellNotices;
 	TArray<FNarrativeEvent> CommittedNotices;
+	struct FPartyNotice
+	{
+		FNarrativeEntityId Member;
+		bool bJoined = false;
+		ENarrativeDepartureReason Reason = ENarrativeDepartureReason::Dismissed;
+	};
+	TArray<FPartyNotice> PartyNotices;
 	bool bPumping = false;
+
+	FNarrativePartyRecord Party;
+	/* Configuration, not truth: the game sets it from db.Narrative.BetrayalGrace. */
+	int32 BetrayalGrace = 1;
+	bool bDeparturesEnabled = false;
+	float BetrayalStrength = 0.6f;
+	TFunction<void(FNarrativeEvent&)> WitnessResolver;
+	/* The paused-conversation beat being committed, if any (AdvanceBeat). */
+	const FNarrativeBeatContext* CurrentBeat = nullptr;
 
 	TMap<TTuple<FNarrativeEntityId, FNarrativeEntityId>, FNarrativeDialogPairState> DialogPairs;
 };

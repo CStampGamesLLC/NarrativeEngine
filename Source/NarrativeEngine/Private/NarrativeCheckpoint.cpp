@@ -7,7 +7,8 @@
 
 namespace
 {
-	constexpr int32 CheckpointVersion = 1;
+	/* 2 (P1): the party record and the checkpoint id. 1 still loads, with the party left for the game to install. */
+	constexpr int32 CheckpointVersion = 2;
 	constexpr int32 MaxRecords = 1000000;
 	struct FCheckpointReader : FMemoryReader
 	{
@@ -88,13 +89,17 @@ void FNarrativeCampaign::SerializeCheckpoint(FArchive& Ar)
 	int32 Version = CheckpointVersion;
 	int32 ModelVersion = FNarrativeCampaignHeader::ModelVersion;
 	Ar << Magic << Version << ModelVersion;
-	if (Magic != 0x44424350 || Version != CheckpointVersion || ModelVersion != FNarrativeCampaignHeader::ModelVersion)
+	if (Magic != 0x44424350 || Version < 1 || Version > CheckpointVersion || ModelVersion != FNarrativeCampaignHeader::ModelVersion)
 	{
 		Ar.SetError();
 		return;
 	}
 	Ar << Header.Seed << Header.PresetId << Header.StoreGeneration << Header.IdNamespace << Header.NextRuntimeId
 	   << Header.LastActivationId;
+	if (Version >= 2)
+	{
+		Ar << Header.CheckpointId;
+	}
 	Clock.SerializeCheckpoint(Ar);
 	Records(Ar, Entities);
 	Records(Ar, Minds);
@@ -165,9 +170,19 @@ void FNarrativeCampaign::SerializeCheckpoint(FArchive& Ar)
 			Ar << Entry.Key.Key.Guid << Entry.Key.Value.Guid << Entry.Value.Opportunities << Entry.Value.RecentOffers;
 		}
 	}
+
+	// The roster by entity id (TDD Pattern 21): a load installs it whole, so it never reads as a join or a departure.
+	if (Version >= 2)
+	{
+		Record(Ar, Party);
+	}
+	else if (Ar.IsLoading())
+	{
+		Party = FNarrativePartyRecord();
+	}
 }
 
-bool FNarrativeCampaign::ExportCheckpoint(TArray<uint8>& Bytes) const
+bool FNarrativeCampaign::ExportCheckpoint(TArray<uint8>& Bytes, uint64* OutCheckpointId) const
 {
 	if (bPumping || !Reserved.IsEmpty())
 	{
@@ -176,11 +191,24 @@ bool FNarrativeCampaign::ExportCheckpoint(TArray<uint8>& Bytes) const
 	Bytes.Reset();
 	FMemoryWriter Writer(Bytes);
 	FObjectAndNameAsStringProxyArchive Archive(Writer, false);
-	const_cast<FNarrativeCampaign*>(this)->SerializeCheckpoint(Archive);
+	FNarrativeCampaign* Mutable = const_cast<FNarrativeCampaign*>(this);
+	// A fresh id per export, unique across save branches (two saves played on from one load never share one): the game
+	// save keeps it beside its actor half, and a load refuses a pair that disagrees. Not narrative truth, so never hashed.
+	const FGuid Unique = FGuid::NewGuid();
+	Mutable->Header.CheckpointId = ((static_cast<uint64>(Unique.A) << 32) | Unique.B) ^ ((static_cast<uint64>(Unique.C) << 32) | Unique.D);
+	if (Mutable->Header.CheckpointId == 0)
+	{
+		Mutable->Header.CheckpointId = 1;
+	}
+	if (OutCheckpointId)
+	{
+		*OutCheckpointId = Header.CheckpointId;
+	}
+	Mutable->SerializeCheckpoint(Archive);
 	return !Archive.IsError() && Bytes.Num() <= 64 * 1024 * 1024;
 }
 
-bool FNarrativeCampaign::ImportCheckpoint(const TArray<uint8>& Bytes, FString& Error)
+bool FNarrativeCampaign::ImportCheckpoint(const TArray<uint8>& Bytes, FString& Error, uint64 ExpectedCheckpointId)
 {
 	if (bPumping || Bytes.IsEmpty() || Bytes.Num() > 64 * 1024 * 1024)
 	{
@@ -223,6 +251,19 @@ bool FNarrativeCampaign::ImportCheckpoint(const TArray<uint8>& Bytes, FString& E
 			}
 		}
 	}
+	if (ExpectedCheckpointId != 0 && Candidate.Header.CheckpointId != ExpectedCheckpointId)
+	{
+		Error = TEXT("Campaign checkpoint belongs to a different save than its actor state.");
+		return false;
+	}
+	for (const FNarrativeEntityId& Member : Candidate.Party.Members)
+	{
+		if (!Candidate.Entities.Contains(Member) || Candidate.Party.Members.FilterByPredicate([&Member](const FNarrativeEntityId& Id) { return Id == Member; }).Num() != 1)
+		{
+			Error = TEXT("Campaign checkpoint's party names an unknown or repeated member.");
+			return false;
+		}
+	}
 	for (const auto& Tick : Candidate.Ingress)
 	{
 		for (const auto& Event : Tick.Value)
@@ -246,6 +287,18 @@ bool FNarrativeCampaign::ImportCheckpoint(const TArray<uint8>& Bytes, FString& E
 	Completions = MoveTemp(Candidate.Completions);
 	RecentEvents = MoveTemp(Candidate.RecentEvents);
 	DialogPairs = MoveTemp(Candidate.DialogPairs);
+	Party = MoveTemp(Candidate.Party);
+	PartyNotices.Reset();
+	// A tell against a member whose world warning was seen before the save plays again before anyone strikes (Pattern 21).
+	for (TPair<FNarrativeEntityId, FNarrativeMind>& Mind : Minds)
+	{
+		for (TPair<FNarrativeEntityId, FNarrativeRelation>& Relation : Mind.Value.Relations)
+		{
+			FNarrativeTell& Tell = Relation.Value.Tell;
+			Tell.bWarningReplayDue = Tell.bActive && Tell.bWarningSeen && IsPartyMember(Relation.Key);
+		}
+	}
+	CurrentBeat = nullptr;
 	Reserved.Reset();
 	StanceNotices.Reset();
 	TellNotices.Reset();

@@ -30,6 +30,7 @@ const TCHAR* LexToString(ENarrativeEventKind Kind)
 	case ENarrativeEventKind::Encounter: return TEXT("Encounter");
 	case ENarrativeEventKind::WarningSeen: return TEXT("WarningSeen");
 	case ENarrativeEventKind::Silence: return TEXT("Silence");
+	case ENarrativeEventKind::Departure: return TEXT("Departure");
 	default: return TEXT("?");
 	}
 }
@@ -205,7 +206,10 @@ void FNarrativeCampaign::Reset(uint64 Seed)
 	StanceNotices.Reset();
 	TellNotices.Reset();
 	CommittedNotices.Reset();
+	PartyNotices.Reset();
 	DialogPairs.Reset();
+	Party = FNarrativePartyRecord();
+	CurrentBeat = nullptr;
 }
 
 #pragma region Dialog
@@ -245,7 +249,7 @@ void FNarrativeCampaign::RecordOffer(const FNarrativeEntityId& Speaker, const FN
 	}
 }
 
-bool FNarrativeCampaign::AdvanceBeat(double Seconds, FString* OutHeldBy)
+bool FNarrativeCampaign::AdvanceBeat(double Seconds, FString* OutHeldBy, const FNarrativeBeatContext* Beat)
 {
 	// A beat never seals past a hold (TDD Pattern 27): a producer that still owes a tick stops it, and says so.
 	for (int32 Index = 0; Index < FNarrativeClock::NumProducers; ++Index)
@@ -263,7 +267,11 @@ bool FNarrativeCampaign::AdvanceBeat(double Seconds, FString* OutHeldBy)
 	}
 
 	Clock.Advance(FMath::Max(0.0, Seconds));
-	Pump();
+	{
+		// The decisions this beat seals know which beat it is: a betrayal's grace counts only the party's own lines.
+		TGuardValue<const FNarrativeBeatContext*> BeatScope(CurrentBeat, Beat);
+		Pump();
+	}
 	++Stats.Beats;
 	return true;
 }
@@ -429,6 +437,17 @@ uint64 FNarrativeCampaign::SubmitFact(FNarrativeEvent Fact, ENarrativeProducer P
 
 	// Once-only events (TDD Pattern 11): the same completion reported twice is one event.
 	Fact.Producer = static_cast<uint8>(Producer);
+	// A warning replayed after a load (Pattern 21) is a new completion of the same tell: salted with the load's checkpoint,
+	// so the saved ledger doesn't absorb it, while a repeat within this session still is.
+	if (Fact.Kind == ENarrativeEventKind::WarningSeen && Fact.CompletionKey == 0)
+	{
+		const FNarrativeMind* Mind = Minds.Find(Fact.Instigator);
+		const FNarrativeRelation* Relation = Mind ? Mind->Relations.Find(Fact.Subject) : nullptr;
+		if (Relation && Relation->Tell.bWarningReplayDue)
+		{
+			Fact.CompletionKey = NarrativeRng::Mix(Fact.DeriveCompletionKey() ^ Header.CheckpointId);
+		}
+	}
 	const uint64 CompletionKey = Fact.DeriveCompletionKey();
 	if (const uint64 Existing = FindCompletion(CompletionKey))
 	{
@@ -770,6 +789,12 @@ void FNarrativeCampaign::ApplyWorldConsequences(int64 Tick, const FNarrativeEven
 		if (FNarrativeEntityRecord* Victim = Entities.Find(Fact.Target.IsValid() ? Fact.Target : Fact.Instigator))
 		{
 			Victim->LifeState = ENarrativeLifeState::Dead;
+			// The dead leave the party once, as the death commits (TDD Pattern 20); the player's own character ends the
+			// game instead. The actor's EndPlay only detaches its view.
+			if (Victim->Id != Party.PlayerCharacter)
+			{
+				LeaveParty(Victim->Id, ENarrativeDepartureReason::Death);
+			}
 		}
 		break;
 
@@ -777,12 +802,25 @@ void FNarrativeCampaign::ApplyWorldConsequences(int64 Tick, const FNarrativeEven
 		if (FNarrativeMind* Mind = Minds.Find(Fact.Instigator))
 		{
 			FNarrativeRelation* Relation = Mind->Relations.Find(Fact.Subject);
+			// A warning owed again after a load: playing it releases harm once more, and changes nothing the save held.
+			if (Relation && Relation->Tell.bActive && Relation->Tell.bWarningReplayDue && Fact.ActivationId == Relation->Tell.GetIdentity())
+			{
+				Relation->Tell.bWarningReplayDue = false;
+				TellNotices.Add({FTellNotice::EKind::Seen, Fact.Instigator, Fact.Subject});
+				UE_LOG(LogNarrativeTrace, Verbose, TEXT("[%lld] %s's warning to %s was seen again after the load."), Tick, *Fact.Instigator.ToShortString(), *Fact.Subject.ToShortString());
+			}
 			// Only the warning for this very turn, finished after it, opens the barrier.
-			if (Relation && Relation->Tell.bActive && !Relation->Tell.bWarningSeen && Fact.OccurrenceTick >= Relation->Tell.StartTick
+			else if (Relation && Relation->Tell.bActive && !Relation->Tell.bWarningSeen && Fact.OccurrenceTick >= Relation->Tell.StartTick
 				&& Fact.ActivationId == Relation->Tell.GetIdentity())
 			{
 				Relation->Tell.bWarningSeen = true;
 				Relation->Tell.WarningSeenTick = Tick;
+				// The world warning also starts a betrayal's grace, unless the drawer already showed it.
+				if (!Relation->Tell.bGraceStarted)
+				{
+					Relation->Tell.bGraceStarted = true;
+					Relation->Tell.GraceStartTick = Tick;
+				}
 				TellNotices.Add({FTellNotice::EKind::Seen, Fact.Instigator, Fact.Subject});
 				UE_LOG(LogNarrativeTrace, Verbose, TEXT("[%lld] %s's warning to %s was seen."), Tick, *Fact.Instigator.ToShortString(), *Fact.Subject.ToShortString());
 			}
@@ -812,6 +850,20 @@ void FNarrativeCampaign::RunDecisions(int64 Tick, int32& InOutDecisions)
 			{
 				Decide(Mind, Mind.Relations.FindChecked(Subject), Tick);
 				++InOutDecisions;
+			}
+
+			// A betrayal whose grace ran out commits after the whole snapshot is decided, once (TDD Pattern 20).
+			if (IsPartyMember(Observer))
+			{
+				for (const FNarrativeEntityId& Subject : SortedKeys(Mind.Relations))
+				{
+					const FNarrativeRelation& Relation = Mind.Relations.FindChecked(Subject);
+					if (Relation.Tell.bActive && Relation.Tell.GraceDecisions >= BetrayalGrace && IsPartyMember(Subject))
+					{
+						CommitBetrayal(Observer, Subject, Relation.Tell, Tick);
+						break;
+					}
+				}
 			}
 		}
 
@@ -853,6 +905,8 @@ void FNarrativeCampaign::Decide(FNarrativeMind& Mind, FNarrativeRelation& Relati
 		Tick, *Mind.Observer.ToShortString(), *Relation.Subject.ToShortString(), Relation.DecisionCount,
 		Relation.Parts.Position, Relation.Parts.TanhRegard, Relation.Parts.Bias, Affinity, LexToString(New));
 
+	AdvanceGrace(Mind, Relation, Old, New, Tick);
+
 	if (New == Old)
 	{
 		// The first decision is news even when it stays None: views show None explicitly, not their default.
@@ -881,11 +935,18 @@ void FNarrativeCampaign::Decide(FNarrativeMind& Mind, FNarrativeRelation& Relati
 				break;
 			}
 		}
+		// Turned inside the paused conversation it is in: the drawer shows the warning at once (Pattern 27), so the grace
+		// starts now. Harm still waits for the world warning.
+		if (CurrentBeat && CurrentBeat->Involves(Mind.Observer))
+		{
+			Relation.Tell.bGraceStarted = true;
+			Relation.Tell.GraceStartTick = Tick;
+		}
 		TellNotices.Add({FTellNotice::EKind::Started, Mind.Observer, Relation.Subject});
 	}
 	else if (Old == ENarrativeStance::Hostile && Relation.Tell.bActive)
 	{
-		const bool bWasPending = !Relation.Tell.bWarningSeen;
+		const bool bWasPending = !Relation.Tell.IsReleased();
 		Relation.Tell = FNarrativeTell();
 		if (bWasPending)
 		{
@@ -1170,6 +1231,12 @@ void FNarrativeCampaign::FlushNotifications()
 	{
 		OnStanceDecided.Broadcast(Notice.Observer, Notice.Subject, Notice.Old, Notice.New, Notice.Tick);
 	}
+	TArray<FPartyNotice> PartyChanges = MoveTemp(PartyNotices);
+	PartyNotices.Reset();
+	for (const FPartyNotice& Notice : PartyChanges)
+	{
+		OnPartyChanged.Broadcast(Notice.Member, Notice.bJoined, Notice.Reason);
+	}
 	for (const FTellNotice& Notice : Tells)
 	{
 		switch (Notice.Kind)
@@ -1200,7 +1267,7 @@ FNarrativeRelationSnapshot FNarrativeCampaign::ReadRelation(const FNarrativeEnti
 	Snapshot.bDecided = Relation->bDecided;
 	Snapshot.Regard = GetRegardAtFrontier(Observer, Subject);
 	Snapshot.bTellActive = Relation->Tell.bActive;
-	Snapshot.bWarningSeen = Relation->Tell.bWarningSeen;
+	Snapshot.bWarningSeen = Relation->Tell.IsReleased();
 	return Snapshot;
 }
 
@@ -1501,6 +1568,21 @@ uint32 FNarrativeCampaign::ComputeStateHash(bool bIncludeClockDebt) const
 				Archive << Names;
 			}
 		}
+	}
+
+	// The party, in slot order: membership decides grace, pins and every command (TDD Pattern 20).
+	{
+		TArray<FGuid> Members;
+		for (const FNarrativeEntityId& Member : Party.Members)
+		{
+			Members.Add(Member.Guid);
+		}
+		uint32 PartyRevision = Party.Revision;
+		bool bEstablished = Party.bEstablished;
+		int32 Departures = Party.Departures;
+		FGuid Player = Party.PlayerCharacter.Guid;
+		bool bProvisional = Party.bProvisional;
+		Archive << Members << PartyRevision << bEstablished << Departures << Player << bProvisional;
 	}
 
 	for (const FNarrativeEntityId& Id : SortedKeys(Entities))

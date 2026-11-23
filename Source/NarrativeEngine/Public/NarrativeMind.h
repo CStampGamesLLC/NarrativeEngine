@@ -108,6 +108,32 @@ struct NARRATIVEENGINE_API FNarrativeTell
 	UPROPERTY()
 	uint64 CauseEventId = 0;
 
+	/*
+	 * A betrayal's grace (TDD Pattern 20), for a tell toward a fellow party member. It starts once the warning has been
+	 * seen, in the world (WarningSeen) or in the drawer of the conversation the turn happened in; only decisions after
+	 * that count, and in a paused conversation only those on the beats of the party's own lines. The world warning
+	 * (bWarningSeen) still gates harm on its own.
+	 */
+	UPROPERTY()
+	bool bGraceStarted = false;
+
+	UPROPERTY()
+	int64 GraceStartTick = 0;
+
+	/* Eligible decisions since the grace started that stayed Hostile. Removal commits when it reaches K. */
+	UPROPERTY()
+	int32 GraceDecisions = 0;
+
+	/*
+	 * Loaded with its world warning already seen, against a party member (TDD Pattern 21): the player of this session
+	 * hasn't seen it, so it plays again in full and harm waits for it. The grace keeps its progress. Set by every load,
+	 * so never saved and never hashed: a restored run reads the same truth as one that never stopped.
+	 */
+	bool bWarningReplayDue = false;
+
+	/* Whether harm through this tell is released: its world warning seen, and not owed again after a load. */
+	bool IsReleased() const { return bWarningSeen && !bWarningReplayDue; }
+
 	/* This tell's identity, which a WarningSeen fact must name: a warning played for an earlier turn opens nothing. */
 	uint64 GetIdentity() const { return bActive ? static_cast<uint64>(StartTick) + 1 : 0; }
 };
