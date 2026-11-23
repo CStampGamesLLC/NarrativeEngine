@@ -157,8 +157,12 @@ bool FNarrativeCampaign::AdvanceGrace(const FNarrativeMind& Mind, FNarrativeRela
 	// Only a decision that stays Hostile, about a fellow member, after the warning was seen; and in a paused conversation
 	// only one on a beat of the party's own line, so a reply never spends the player's window.
 	FNarrativeTell& Tell = Relation.Tell;
-	// The player's own character never leaves its own party, however it feels about a member.
+	// The player's own character never leaves its own party, however it feels about a member; nor do the dead.
 	if (!bDeparturesEnabled || Mind.Observer == Party.PlayerCharacter)
+	{
+		return false;
+	}
+	if (const FNarrativeEntityRecord* Record = Entities.Find(Mind.Observer); !Record || Record->LifeState != ENarrativeLifeState::Alive)
 	{
 		return false;
 	}

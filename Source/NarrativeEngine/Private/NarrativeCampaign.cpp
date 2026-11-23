@@ -799,13 +799,9 @@ void FNarrativeCampaign::ApplyWorldConsequences(int64 Tick, const FNarrativeEven
 		if (FNarrativeEntityRecord* Victim = Entities.Find(Fact.Target.IsValid() ? Fact.Target : Fact.Instigator))
 		{
 			Victim->LifeState = ENarrativeLifeState::Dead;
-			// The dead leave the party once, as the death commits (TDD Pattern 20); the player's own character ends the
-			// game instead. The actor's EndPlay only detaches its view. Either way a duel the victim fought is over.
+			// The dead keep their place in the party (its portrait shows the death); they never betray or leave it on their
+			// own. A duel the victim fought is over.
 			EndDuel(Victim->Id, ENarrativeDuelEnd::Died);
-			if (Victim->Id != Party.PlayerCharacter)
-			{
-				LeaveParty(Victim->Id, ENarrativeDepartureReason::Death);
-			}
 		}
 		break;
 
