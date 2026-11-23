@@ -183,12 +183,19 @@ FVectorND UNarrativeEntityComponent::GetOldLocation() const
 		return {};
 	}
 
+	// Unloaded (a standalone run skips entity defs it hasn't loaded): no entity, so no old location. Not an ensure:
+	// save capture asks every character, and an unloaded def is expected there.
+	if (!EntityDef.IsValid())
+	{
+		return {};
+	}
+
 	FNarrativeEntityInstance* EntityInstance = NarrativeSubsystem->Scene.Entities.Find(*EntityDef);
 	if (!EntityInstance)
 	{
 		return {};
 	}
-	
+
 	return EntityInstance->OldPosition;
 }
 
