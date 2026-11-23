@@ -264,6 +264,16 @@ bool FNarrativeCampaign::ImportCheckpoint(const TArray<uint8>& Bytes, FString& E
 			return false;
 		}
 	}
+	for (const FNarrativeDuel& Duel : Candidate.Party.Duels)
+	{
+		// An ended duel may outlive a member's departure, but one still fought is between two members.
+		if (!Candidate.Entities.Contains(Duel.Challenger) || !Candidate.Entities.Contains(Duel.Challenged) || Duel.Challenger == Duel.Challenged
+			|| (Duel.IsActive() && !Candidate.AreCoMembers(Duel.Challenger, Duel.Challenged)))
+		{
+			Error = TEXT("Campaign checkpoint's party holds an invalid duel.");
+			return false;
+		}
+	}
 	for (const auto& Tick : Candidate.Ingress)
 	{
 		for (const auto& Event : Tick.Value)
@@ -289,6 +299,7 @@ bool FNarrativeCampaign::ImportCheckpoint(const TArray<uint8>& Bytes, FString& E
 	DialogPairs = MoveTemp(Candidate.DialogPairs);
 	Party = MoveTemp(Candidate.Party);
 	PartyNotices.Reset();
+	DuelNotices.Reset();
 	// A tell against a member whose world warning was seen before the save plays again before anyone strikes (Pattern 21).
 	for (TPair<FNarrativeEntityId, FNarrativeMind>& Mind : Minds)
 	{

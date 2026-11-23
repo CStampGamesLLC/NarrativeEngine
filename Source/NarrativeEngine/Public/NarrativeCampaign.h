@@ -17,6 +17,8 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnNarrativeTell, const FNarrativeEntityId&
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnNarrativeEventCommitted, const FNarrativeEvent&);
 /* The party record changed: a join (bJoined), a departure (with its reason), or a reorder or whole install (Member unset). */
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnNarrativePartyChanged, const FNarrativeEntityId& /*Member*/, bool /*bJoined*/, ENarrativeDepartureReason /*Reason*/);
+/* A duel began (bStarted) or ended (its End says why). */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnNarrativeDuelChanged, const FNarrativeDuel& /*Duel*/, bool /*bStarted*/);
 
 /** Where FNarrativeCampaign::ReadBelief's answer came from. */
 enum class ENarrativeBeliefSource : uint8
@@ -332,6 +334,30 @@ public:
 	void SetPartyProvisional(bool bProvisional) { Party.bProvisional = bProvisional; }
 #pragma endregion
 
+#pragma region Duels
+	/**
+	 * Sanctioned combat between two members (see FNarrativeDuel): begins now, at the horizon. False when they aren't both
+	 * living members or either is already fighting one. Asking whether they would is the game's (willingness, standing).
+	 */
+	bool StartDuel(const FNarrativeEntityId& Challenger, const FNarrativeEntityId& Challenged);
+
+	/** Ends the duel Participant is fighting, through the tick in progress. Loser names who went down, for Downed. */
+	bool EndDuel(const FNarrativeEntityId& Participant, ENarrativeDuelEnd Reason, const FNarrativeEntityId& Loser = FNarrativeEntityId());
+
+	/** The duel Participant is fighting now, or null. */
+	const FNarrativeDuel* FindDuel(const FNarrativeEntityId& Participant) const;
+
+	/** Whether A and B are fighting each other now. */
+	bool AreDueling(const FNarrativeEntityId& A, const FNarrativeEntityId& B) const;
+
+	/** Whether a blow between A and B struck at Tick fell inside a duel between them, fought or since ended. */
+	bool IsSanctioned(const FNarrativeEntityId& A, const FNarrativeEntityId& B, int64 Tick) const;
+
+	/** How much a sanctioned blow moves regard, against an unsanctioned one: 0 (the default) moves none. Configuration. */
+	void SetDuelHarmScale(float Scale) { DuelHarmScale = FMath::Max(0.f, Scale); }
+	float GetDuelHarmScale() const { return DuelHarmScale; }
+#pragma endregion
+
 #pragma region Game hooks (threat)
 	/** Source threatens Observer until UntilTick: pinned so long. Every new threat fact extends it. */
 	void PinThreat(const FNarrativeEntityId& Observer, const FNarrativeEntityId& Source, int64 UntilTick);
@@ -365,6 +391,7 @@ public:
 	FOnNarrativeTell OnWarningSeen;
 	FOnNarrativeEventCommitted OnEventCommitted;
 	FOnNarrativePartyChanged OnPartyChanged;
+	FOnNarrativeDuelChanged OnDuelChanged;
 
 private:
 	void SerializeCheckpoint(FArchive& Archive);
@@ -402,6 +429,8 @@ private:
 	void CommitBetrayal(const FNarrativeEntityId& Member, const FNarrativeEntityId& Subject, const FNarrativeTell& Tell, int64 Tick);
 	/* Party records changed: pins follow, the revision bumps, listeners hear after the pump. */
 	void NoteParty(const FNarrativeEntityId& Member, bool bJoined, ENarrativeDepartureReason Reason);
+	/* Drops ended duels whose every covered tick has committed. */
+	void PruneDuels(int64 CommittedTick);
 
 	FNarrativeCampaignHeader Header;
 	FNarrativeCampaignStats Stats;
@@ -445,6 +474,12 @@ private:
 		ENarrativeDepartureReason Reason = ENarrativeDepartureReason::Dismissed;
 	};
 	TArray<FPartyNotice> PartyNotices;
+	struct FDuelNotice
+	{
+		FNarrativeDuel Duel;
+		bool bStarted = false;
+	};
+	TArray<FDuelNotice> DuelNotices;
 	bool bPumping = false;
 
 	FNarrativePartyRecord Party;
@@ -453,6 +488,8 @@ private:
 	bool bDeparturesEnabled = false;
 	float BetrayalStrength = 0.6f;
 	TFunction<void(FNarrativeEvent&)> WitnessResolver;
+	/* Configuration, not truth: the game sets it from db.Narrative.Duel.HarmScale. */
+	float DuelHarmScale = 0.f;
 	/* The paused-conversation beat being committed, if any (AdvanceBeat). */
 	const FNarrativeBeatContext* CurrentBeat = nullptr;
 

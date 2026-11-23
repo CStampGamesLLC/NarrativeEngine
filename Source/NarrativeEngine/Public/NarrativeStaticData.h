@@ -35,7 +35,8 @@ ENUM_CLASS_FLAGS(ENarrativeDialogTarget);
 UENUM(BlueprintType)
 enum class ENarrativeOutcomePolicy : uint8
 {
-	/** From the card's mechanic tag: GiveItem a gift, Recruit a recruit, RequestItem an item request, EndDialog a farewell, else a line. */
+	/** From the card's mechanic tag: GiveItem a gift, Recruit a recruit, RequestItem an item request, Duel a duel, EndDuel a
+	 * duel called off, EndDialog a farewell, else a line. */
 	Auto,
 	/** The line carries the deed, as every card without a mechanic does. */
 	Line,
@@ -50,6 +51,13 @@ enum class ENarrativeOutcomePolicy : uint8
 	 * legally give the speaker something the card asks for; how well the ask lands makes their gift likelier.
 	 */
 	RequestItem,
+	/**
+	 * Offers a fellow member a duel: sanctioned combat between the two until one is downed or a card calls it off. Like an
+	 * invitation the line carries J = 0; the addressee accepts only when willing, and blows inside the duel are no grievance.
+	 */
+	Duel,
+	/** Calls off the duel the speaker or the addressee is fighting. The line carries its own J like any line. */
+	EndDuel,
 };
 
 /**

@@ -31,6 +31,65 @@ enum class ENarrativeMemberState : uint8
 	PendingBetrayal,
 };
 
+/** Why a duel ended. */
+UENUM(BlueprintType)
+enum class ENarrativeDuelEnd : uint8
+{
+	/* Still being fought. */
+	None,
+	/* One of the two went down: Loser names who. */
+	Downed,
+	/* A card called it off. */
+	Called,
+	/* One of the two left the party. */
+	Departed,
+	Died,
+};
+
+NARRATIVEENGINE_API const TCHAR* LexToString(ENarrativeDuelEnd End);
+
+/**
+ * Sanctioned combat between two party members: a duel offered on a card and accepted. While it is fought the two may
+ * harm each other, and the blows between them are valued at the campaign's duel scale (none, by default), so a bout is
+ * nobody's grievance and nobody's betrayal. It ends when one of the two is downed, a card calls it off, or one leaves.
+ *
+ * An ended duel stays on record until every tick it covered has committed: a blow is judged by when it was struck, so
+ * the one that downs the loser is still sanctioned when its fact commits after the duel ended.
+ */
+USTRUCT()
+struct NARRATIVEENGINE_API FNarrativeDuel
+{
+	GENERATED_BODY()
+
+	/* Who offered it. */
+	UPROPERTY()
+	FNarrativeEntityId Challenger;
+
+	/* Who accepted it. */
+	UPROPERTY()
+	FNarrativeEntityId Challenged;
+
+	/* Horizon ticks it covers: from its start through its end, inclusive. EndTick below zero while it is fought. */
+	UPROPERTY()
+	int64 StartTick = 0;
+
+	UPROPERTY()
+	int64 EndTick = -1;
+
+	UPROPERTY()
+	ENarrativeDuelEnd End = ENarrativeDuelEnd::None;
+
+	/* Downed only: who went down. */
+	UPROPERTY()
+	FNarrativeEntityId Loser;
+
+	bool IsActive() const { return EndTick < 0; }
+	bool Involves(const FNarrativeEntityId& Id) const { return Id.IsValid() && (Id == Challenger || Id == Challenged); }
+	bool Pairs(const FNarrativeEntityId& A, const FNarrativeEntityId& B) const { return A != B && Involves(A) && Involves(B); }
+	FNarrativeEntityId OpponentOf(const FNarrativeEntityId& Id) const { return Id == Challenger ? Challenged : Id == Challenged ? Challenger : FNarrativeEntityId(); }
+	bool Covers(int64 Tick) const { return Tick >= StartTick && (IsActive() || Tick <= EndTick); }
+};
+
 /**
  * The player's party, as narrative truth (TDD Patterns 20, 21): who is in it by stable entity id, in slot order, and its
  * revision. Actors are views: a member streamed out, unloaded or not yet spawned is still a member. Only a join, a
@@ -67,6 +126,10 @@ struct NARRATIVEENGINE_API FNarrativePartyRecord
 	 * dropped. Saved, so a migration survives another save and load. */
 	UPROPERTY()
 	bool bProvisional = false;
+
+	/* Duels being fought, and ended ones until the ticks they covered have committed. */
+	UPROPERTY()
+	TArray<FNarrativeDuel> Duels;
 };
 
 /**

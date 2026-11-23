@@ -17,6 +17,18 @@ enum class ENarrativeOrigin : uint8
 	Forced,
 };
 
+/** Whether a blow was a sanctioned duel blow (FNarrativeDuel), as ruled by whoever saw it struck. */
+UENUM()
+enum class ENarrativeSanction : uint8
+{
+	/* No producer ruled: the campaign rules at commit, by the duel's window at OccurrenceTick. */
+	Unruled,
+	/* Struck inside a live duel between the two: valued at the duel scale. */
+	Sanctioned,
+	/* Struck outside one, even on a tick a duel covers: valued in full. */
+	Unsanctioned,
+};
+
 /** What a fact records. Kinds past Death land with their increments. */
 UENUM()
 enum class ENarrativeEventKind : uint8
@@ -162,6 +174,13 @@ struct NARRATIVEENGINE_API FNarrativeEvent
 
 	UPROPERTY()
 	ENarrativeOutcome Outcome = ENarrativeOutcome::Completed;
+
+	/*
+	 * A blow's duel ruling, made when it was struck, so the world's answer to it (threat) and its valuation agree. A duel
+	 * ends mid-tick, and a tick's window alone can't tell a blow before the yield from one after it.
+	 */
+	UPROPERTY()
+	ENarrativeSanction Sanction = ENarrativeSanction::Unruled;
 #pragma endregion
 
 #pragma region Meaning

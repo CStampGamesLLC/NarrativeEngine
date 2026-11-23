@@ -555,6 +555,15 @@ ENarrativeOutcomePolicy UNarrativeDialogDef::GetOutcomePolicy() const
 	{
 		return ENarrativeOutcomePolicy::RequestItem;
 	}
+	// Before EndDialog: a duel card may also close the drawer, and its outcome is still the duel.
+	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.EndDuel")))
+	{
+		return ENarrativeOutcomePolicy::EndDuel;
+	}
+	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.Duel")))
+	{
+		return ENarrativeOutcomePolicy::Duel;
+	}
 	if (HasTagUnder(AbilityTags, TEXT("Dialog.Mechanic.EndDialog")))
 	{
 		return ENarrativeOutcomePolicy::Farewell;

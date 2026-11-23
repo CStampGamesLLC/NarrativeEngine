@@ -16,6 +16,19 @@ const TCHAR* LexToString(ENarrativeDepartureReason Reason)
 	}
 }
 
+const TCHAR* LexToString(ENarrativeDuelEnd End)
+{
+	switch (End)
+	{
+	case ENarrativeDuelEnd::None: return TEXT("None");
+	case ENarrativeDuelEnd::Downed: return TEXT("Downed");
+	case ENarrativeDuelEnd::Called: return TEXT("Called");
+	case ENarrativeDuelEnd::Departed: return TEXT("Departed");
+	case ENarrativeDuelEnd::Died: return TEXT("Died");
+	default: return TEXT("?");
+	}
+}
+
 #pragma region Party
 ENarrativeMemberState FNarrativeCampaign::GetMemberState(const FNarrativeEntityId& Id) const
 {
@@ -93,10 +106,14 @@ bool FNarrativeCampaign::JoinParty(const FNarrativeEntityId& Id, int32 Slot)
 
 bool FNarrativeCampaign::LeaveParty(const FNarrativeEntityId& Id, ENarrativeDepartureReason Reason)
 {
-	if (Party.Members.Remove(Id) == 0)
+	if (!IsPartyMember(Id))
 	{
 		return false;
 	}
+
+	// A duel is a party's affair: whoever leaves, by any reason, ends theirs first.
+	EndDuel(Id, Reason == ENarrativeDepartureReason::Death ? ENarrativeDuelEnd::Died : ENarrativeDuelEnd::Departed);
+	Party.Members.Remove(Id);
 
 	++Party.Departures;
 	NoteParty(Id, false, Reason);
@@ -195,5 +212,82 @@ void FNarrativeCampaign::CommitBetrayal(const FNarrativeEntityId& Member, const 
 	Fact.Recipients.Insert(Victim, 0);
 	Fact.Label = FString::Printf(TEXT("%s leaves the party, turning on %s"), *Member.ToShortString(), *Subject.ToShortString());
 	SubmitFact(MoveTemp(Fact), ENarrativeProducer::Roster);
+}
+#pragma endregion
+
+#pragma region Duels
+const FNarrativeDuel* FNarrativeCampaign::FindDuel(const FNarrativeEntityId& Participant) const
+{
+	return Party.Duels.FindByPredicate([&Participant](const FNarrativeDuel& Duel) { return Duel.IsActive() && Duel.Involves(Participant); });
+}
+
+bool FNarrativeCampaign::AreDueling(const FNarrativeEntityId& A, const FNarrativeEntityId& B) const
+{
+	const FNarrativeDuel* Duel = FindDuel(A);
+	return Duel && Duel->Pairs(A, B);
+}
+
+bool FNarrativeCampaign::IsSanctioned(const FNarrativeEntityId& A, const FNarrativeEntityId& B, int64 Tick) const
+{
+	return Party.Duels.ContainsByPredicate([&](const FNarrativeDuel& Duel) { return Duel.Pairs(A, B) && Duel.Covers(Tick); });
+}
+
+bool FNarrativeCampaign::StartDuel(const FNarrativeEntityId& Challenger, const FNarrativeEntityId& Challenged)
+{
+	// Two living members, neither already fighting one.
+	if (!AreCoMembers(Challenger, Challenged) || FindDuel(Challenger) || FindDuel(Challenged))
+	{
+		return false;
+	}
+	for (const FNarrativeEntityId& Id : {Challenger, Challenged})
+	{
+		const FNarrativeEntityRecord* Record = Entities.Find(Id);
+		if (!Record || Record->LifeState != ENarrativeLifeState::Alive)
+		{
+			return false;
+		}
+	}
+
+	FNarrativeDuel& Duel = Party.Duels.AddDefaulted_GetRef();
+	Duel.Challenger = Challenger;
+	Duel.Challenged = Challenged;
+	// The tick a blow struck now is stamped with.
+	Duel.StartTick = Clock.GetHorizon();
+	DuelNotices.Add({Duel, true});
+	UE_LOG(LogNarrativeTrace, Log, TEXT("[%lld] %s and %s begin a duel."), Duel.StartTick, *Challenger.ToShortString(), *Challenged.ToShortString());
+	if (!bPumping)
+	{
+		FlushNotifications();
+	}
+	return true;
+}
+
+bool FNarrativeCampaign::EndDuel(const FNarrativeEntityId& Participant, ENarrativeDuelEnd Reason, const FNarrativeEntityId& Loser)
+{
+	FNarrativeDuel* Duel = Party.Duels.FindByPredicate([&Participant](const FNarrativeDuel& Candidate) { return Candidate.IsActive() && Candidate.Involves(Participant); });
+	if (!Duel || Reason == ENarrativeDuelEnd::None)
+	{
+		return false;
+	}
+
+	// Through the tick in progress: the blow that ended it was struck now, so it is still sanctioned.
+	Duel->EndTick = FMath::Max(Duel->StartTick, Clock.GetHorizon());
+	Duel->End = Reason;
+	Duel->Loser = Reason == ENarrativeDuelEnd::Downed && Duel->Involves(Loser) ? Loser : FNarrativeEntityId();
+	DuelNotices.Add({*Duel, false});
+	UE_LOG(LogNarrativeTrace, Log, TEXT("[%lld] The duel between %s and %s ends (%s%s%s)."), Duel->EndTick, *Duel->Challenger.ToShortString(),
+		*Duel->Challenged.ToShortString(), LexToString(Reason), Duel->Loser.IsValid() ? TEXT(": ") : TEXT(""),
+		Duel->Loser.IsValid() ? *Duel->Loser.ToShortString() : TEXT(""));
+	if (!bPumping)
+	{
+		FlushNotifications();
+	}
+	return true;
+}
+
+void FNarrativeCampaign::PruneDuels(int64 CommittedTick)
+{
+	// Every blow an ended duel covered has committed by now: nothing left to judge by it.
+	Party.Duels.RemoveAll([CommittedTick](const FNarrativeDuel& Duel) { return !Duel.IsActive() && Duel.EndTick <= CommittedTick; });
 }
 #pragma endregion

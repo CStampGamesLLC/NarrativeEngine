@@ -207,6 +207,7 @@ void FNarrativeCampaign::Reset(uint64 Seed)
 	TellNotices.Reset();
 	CommittedNotices.Reset();
 	PartyNotices.Reset();
+	DuelNotices.Reset();
 	DialogPairs.Reset();
 	Party = FNarrativePartyRecord();
 	CurrentBeat = nullptr;
@@ -535,6 +536,8 @@ int32 FNarrativeCampaign::Pump(int32 DecisionBudget)
 		Clock.CommitThrough(NextWork);
 	}
 
+	// Ticks without work are skipped, not committed one by one: prune against the frontier they reached.
+	PruneDuels(Clock.GetFrontier());
 	FlushNotifications();
 	return Decisions;
 }
@@ -618,6 +621,13 @@ void FNarrativeCampaign::CommitLayer(int64 Tick, TArrayView<FNarrativeEvent> Fac
 			continue;
 		}
 
+		// A blow struck inside a duel between the two is sanctioned: it moves regard only at the duel scale, for everyone.
+		// The producer's ruling, made as it was struck, stands; without one, the duel's window at its occurrence decides.
+		const bool bBlow = (Fact.Kind == ENarrativeEventKind::Attack || Fact.Kind == ENarrativeEventKind::AttackAttempt) && Fact.Target.IsValid();
+		const bool bSanctioned = bBlow && (Fact.Sanction == ENarrativeSanction::Unruled
+			? IsSanctioned(Fact.Instigator, Fact.Target, Fact.OccurrenceTick)
+			: Fact.Sanction == ENarrativeSanction::Sanctioned);
+
 		// (2) Gather each recipient's observation, freezing care at the committed affinities.
 		TArray<FNarrativeEntityId, TInlineAllocator<8>> Witnesses;
 		if (Fact.Recipients.IsEmpty())
@@ -694,7 +704,7 @@ void FNarrativeCampaign::CommitLayer(int64 Tick, TArrayView<FNarrativeEvent> Fac
 
 			const double Approval = ApprovalOf(*Mind, Fact);
 			const double TargetMass = Fact.Target.IsValid() ? FMath::Max(1.0, static_cast<double>(Fact.TargetMass)) : 1.0;
-			const double Delta = NarrativeMath::RegardDelta(Fact.Strength, Fact.Stance, Care, Approval, TargetMass);
+			const double Delta = NarrativeMath::RegardDelta(Fact.Strength, Fact.Stance, Care, Approval, TargetMass) * (bSanctioned ? DuelHarmScale : 1.0);
 
 			FPairBatch* Batch = Batches.FindByPredicate([&](const FPairBatch& Candidate)
 			{
@@ -714,7 +724,7 @@ void FNarrativeCampaign::CommitLayer(int64 Tick, TArrayView<FNarrativeEvent> Fac
 			Record.Tick = Tick;
 			Record.Instigator = Fact.Instigator;
 			Record.Target = Fact.Target;
-			Record.Label = Fact.Label;
+			Record.Label = bSanctioned ? Fact.Label + TEXT(" (in a duel)") : Fact.Label;
 			Record.Care = Care;
 			Record.Approval = Approval;
 			Record.TargetMass = TargetMass;
@@ -790,7 +800,8 @@ void FNarrativeCampaign::ApplyWorldConsequences(int64 Tick, const FNarrativeEven
 		{
 			Victim->LifeState = ENarrativeLifeState::Dead;
 			// The dead leave the party once, as the death commits (TDD Pattern 20); the player's own character ends the
-			// game instead. The actor's EndPlay only detaches its view.
+			// game instead. The actor's EndPlay only detaches its view. Either way a duel the victim fought is over.
+			EndDuel(Victim->Id, ENarrativeDuelEnd::Died);
 			if (Victim->Id != Party.PlayerCharacter)
 			{
 				LeaveParty(Victim->Id, ENarrativeDepartureReason::Death);
@@ -1237,6 +1248,12 @@ void FNarrativeCampaign::FlushNotifications()
 	{
 		OnPartyChanged.Broadcast(Notice.Member, Notice.bJoined, Notice.Reason);
 	}
+	TArray<FDuelNotice> Duels = MoveTemp(DuelNotices);
+	DuelNotices.Reset();
+	for (const FDuelNotice& Notice : Duels)
+	{
+		OnDuelChanged.Broadcast(Notice.Duel, Notice.bStarted);
+	}
 	for (const FTellNotice& Notice : Tells)
 	{
 		switch (Notice.Kind)
@@ -1583,6 +1600,18 @@ uint32 FNarrativeCampaign::ComputeStateHash(bool bIncludeClockDebt) const
 		FGuid Player = Party.PlayerCharacter.Guid;
 		bool bProvisional = Party.bProvisional;
 		Archive << Members << PartyRevision << bEstablished << Departures << Player << bProvisional;
+
+		// Duels decide who may harm whom, and which blows are sanctioned.
+		for (const FNarrativeDuel& Duel : Party.Duels)
+		{
+			FGuid Challenger = Duel.Challenger.Guid;
+			FGuid Challenged = Duel.Challenged.Guid;
+			FGuid Loser = Duel.Loser.Guid;
+			int64 StartTick = Duel.StartTick;
+			int64 EndTick = Duel.EndTick;
+			uint8 End = static_cast<uint8>(Duel.End);
+			Archive << Challenger << Challenged << Loser << StartTick << EndTick << End;
+		}
 	}
 
 	for (const FNarrativeEntityId& Id : SortedKeys(Entities))

@@ -164,6 +164,8 @@ namespace NarrativeLints
 			{TEXT("GiveItem"), TEXT("Dialog.Family.Item.Give")},
 			{TEXT("Recruit"), TEXT("Dialog.Family.Recruit")},
 			{TEXT("RequestItem"), TEXT("Dialog.Family.Item.Request")},
+			{TEXT("Duel"), TEXT("Dialog.Family.Duel")},
+			{TEXT("EndDuel"), TEXT("Dialog.Family.Duel.Yield")},
 		};
 		for (const FGameplayTag& Tag : Card.AbilityTags)
 		{
